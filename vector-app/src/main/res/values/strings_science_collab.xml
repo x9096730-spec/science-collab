@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="verify_this_session_content">Verify this session to keep sending and receiving encrypted messages.</string>
+    <string name="verify_now">Verify</string>
 </resources>
