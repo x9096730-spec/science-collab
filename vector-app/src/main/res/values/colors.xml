@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="launcher_background">#0DBD8B</color>
+    <color name="launcher_background">#4338CA</color>
+
+    <color name="element_accent_light">#4338CA</color>
+    <color name="element_accent_dark">#8B93FF</color>
+
+    <color name="science_collab_teal">#2DD4BF</color>
 </resources>
