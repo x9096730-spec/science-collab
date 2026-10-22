@@ -9,8 +9,6 @@ package im.vector.app.features.elementx
 
 import im.vector.app.core.resources.StringProvider
 import im.vector.app.features.raw.wellknown.ElementWellKnown
-import im.vector.app.features.raw.wellknown.MigrationBanner
-import im.vector.lib.strings.R
 
 /**
  * Application id of the Element X FOSS app, used when the homeserver does not specify a target.
@@ -31,30 +29,13 @@ sealed interface MigrationBannerState {
     }
 }
 
+/**
+ * Science Collab: the "Download Element X" banner is permanently disabled.
+ */
+@Suppress("UNUSED_PARAMETER")
 fun ElementWellKnown?.toMigrationBannerState(
         stringProvider: StringProvider,
         useDefaultOnMissingData: Boolean,
 ): MigrationBannerState {
-    // No data at all: either the homeserver has no .well-known file, or it has one with no
-    // migration banner section. Before the switch date the banner stays hidden, after it we
-    // fall back to the default content.
-    val migrationBannerConfig = this?.migrationBanner
-            ?: MigrationBanner().takeIf { useDefaultOnMissingData }
-            ?: return MigrationBannerState.Hide
-    if (migrationBannerConfig.enabled == false) return MigrationBannerState.Hide
-
-    val title = migrationBannerConfig.title?.takeIf { it.isNotBlank() } ?: stringProvider.getString(R.string.view_element_x_banner_title)
-    val body = migrationBannerConfig.body?.takeIf { it.isNotBlank() } ?: stringProvider.getString(R.string.view_element_x_banner_body)
-    // A blank target app id means the homeserver explicitly wants no download button.
-    val showButton = migrationBannerConfig.targetAppIdAndroid?.isNotBlank() ?: true
-    val buttonText = migrationBannerConfig.buttonText?.takeIf { it.isNotBlank() } ?: stringProvider.getString(R.string.view_element_x_banner_button)
-    val targetAppId = migrationBannerConfig.targetAppIdAndroid?.takeIf { it.isNotBlank() } ?: DEFAULT_TARGET_APP_ID
-
-    return MigrationBannerState.Show(
-            title = title,
-            body = body,
-            showButton = showButton,
-            buttonText = buttonText,
-            targetAppId = targetAppId,
-    )
+    return MigrationBannerState.Hide
 }
