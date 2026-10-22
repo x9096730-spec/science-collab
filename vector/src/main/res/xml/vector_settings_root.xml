@@ -56,4 +56,12 @@
         app:fragment="im.vector.app.features.settings.legals.LegalsFragment"
         app:isPreferenceVisible="@bool/settings_root_legals_visible" />
 
+    <im.vector.app.core.preference.VectorPreference
+        android:icon="@drawable/ic_settings_root_general"
+        android:title="Support the project / Поддержать проект">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="https://github.com/x9096730-spec/science-collab" />
+    </im.vector.app.core.preference.VectorPreference>
+
 </androidx.preference.PreferenceScreen>
