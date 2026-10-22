@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="verify_this_session_content">Подтвердите этот сеанс, чтобы продолжить отправлять и получать зашифрованные сообщения.</string>
+</resources>
