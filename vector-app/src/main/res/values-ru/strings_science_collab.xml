@@ -2,4 +2,9 @@
 <resources>
     <string name="verify_this_session_content">Подтвердите этот сеанс, чтобы продолжить отправлять и получать зашифрованные сообщения.</string>
     <string name="verify_now">Подтвердить</string>
+    <string name="ftue_auth_use_case_title">С кем вы будете работать чаще всего?</string>
+    <string name="ftue_auth_use_case_subtitle">Мы поможем найти коллег</string>
+    <string name="ftue_auth_use_case_option_one">Коллеги-исследователи</string>
+    <string name="ftue_auth_use_case_option_two">Лаборатории и команды</string>
+    <string name="ftue_auth_use_case_option_three">Научные сообщества</string>
 </resources>
