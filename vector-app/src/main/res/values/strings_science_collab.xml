@@ -2,4 +2,9 @@
 <resources>
     <string name="verify_this_session_content">Verify this session to keep sending and receiving encrypted messages.</string>
     <string name="verify_now">Verify</string>
+    <string name="ftue_auth_use_case_title">Who will you collaborate with most?</string>
+    <string name="ftue_auth_use_case_subtitle">We will help you find colleagues</string>
+    <string name="ftue_auth_use_case_option_one">Fellow researchers</string>
+    <string name="ftue_auth_use_case_option_two">Lab teams</string>
+    <string name="ftue_auth_use_case_option_three">Scientific communities</string>
 </resources>
