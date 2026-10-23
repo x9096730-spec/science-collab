@@ -17,6 +17,7 @@ import android.view.ViewGroup
 import android.widget.Button
 import android.widget.ImageView
 import android.widget.TextView
+import android.widget.Toast
 import androidx.core.view.isGone
 import androidx.core.view.isVisible
 import androidx.lifecycle.lifecycleScope
@@ -49,7 +50,6 @@ import im.vector.app.features.crypto.verification.self.SelfVerificationBottomShe
 import im.vector.app.features.elementx.MigrationBannerAction
 import im.vector.app.features.elementx.MigrationBannerState
 import im.vector.app.features.elementx.MigrationBannerViewModel
-import im.vector.app.features.home.room.list.UnreadCounterBadgeView
 import im.vector.app.features.home.room.list.actions.RoomListSharedAction
 import im.vector.app.features.home.room.list.actions.RoomListSharedActionViewModel
 import im.vector.app.features.home.room.list.home.HomeRoomListFragment
@@ -88,7 +88,6 @@ class NewHomeDetailFragment :
     @Inject lateinit var buildMeta: BuildMeta
 
     private val viewModel: HomeDetailViewModel by fragmentViewModel()
-    private val newHomeDetailViewModel: NewHomeDetailViewModel by fragmentViewModel()
     private val unknownDeviceDetectorSharedViewModel: UnknownDeviceDetectorSharedViewModel by activityViewModel()
     private val serverBackupStatusViewModel: ServerBackupStatusViewModel by activityViewModel()
     private val migrationBannerViewModel: MigrationBannerViewModel by activityViewModel()
@@ -149,6 +148,7 @@ class NewHomeDetailFragment :
         setupActiveCallView()
         setupDebugButton()
         setupFabs()
+        setupBottomNav()
         setupObservers()
 
         childFragmentManager.commitTransaction {
@@ -193,10 +193,6 @@ class NewHomeDetailFragment :
                     currentCallsViewPresenter.updateCall(callManager.getCurrentCall(), callManager.getCalls())
                     invalidateOptionsMenu()
                 }
-
-        newHomeDetailViewModel.onEach { viewState ->
-            refreshUnreadCounterBadge(viewState.spacesNotificationCounterBadgeState)
-        }
     }
 
     private fun setupObservers() {
@@ -220,15 +216,37 @@ class NewHomeDetailFragment :
         views.newLayoutCreateChatButton.debouncedClicks {
             newChatBottomSheet.takeIf { !it.isAdded }?.show(requireActivity().supportFragmentManager, NewChatBottomSheet.TAG)
         }
-
-        views.newLayoutOpenSpacesButton.debouncedClicks {
-            spaceListBottomSheet.takeIf { !it.isAdded }?.show(requireActivity().supportFragmentManager, SpaceListBottomSheet.TAG)
-        }
     }
 
     private fun showFABs() {
         views.newLayoutCreateChatButton.show()
-        views.newLayoutOpenSpacesButton.show()
+    }
+
+    private fun setupBottomNav() {
+        val navMenu = views.scBottomNav.menu
+        navMenu.clear()
+        navMenu.add(Menu.NONE, NAV_CHATS, 0, R.string.sc_nav_chats).setIcon(R.drawable.ic_sc_nav_chats)
+        navMenu.add(Menu.NONE, NAV_PROJECTS, 1, R.string.sc_nav_projects).setIcon(R.drawable.ic_sc_nav_projects)
+        navMenu.add(Menu.NONE, NAV_LIBRARY, 2, R.string.sc_nav_library).setIcon(R.drawable.ic_sc_nav_library)
+        navMenu.add(Menu.NONE, NAV_PROFILE, 3, R.string.sc_nav_profile).setIcon(R.drawable.ic_sc_nav_profile)
+        views.scBottomNav.selectedItemId = NAV_CHATS
+        views.scBottomNav.setOnItemSelectedListener { item ->
+            when (item.itemId) {
+                NAV_PROJECTS -> {
+                    spaceListBottomSheet.takeIf { !it.isAdded }?.show(requireActivity().supportFragmentManager, SpaceListBottomSheet.TAG)
+                    false
+                }
+                NAV_LIBRARY -> {
+                    Toast.makeText(requireContext(), getString(R.string.sc_nav_library_soon), Toast.LENGTH_SHORT).show()
+                    false
+                }
+                NAV_PROFILE -> {
+                    navigator.openSettings(requireContext())
+                    false
+                }
+                else -> true
+            }
+        }
     }
 
     private fun setCurrentSpace(spaceId: String?) {
@@ -443,10 +461,6 @@ class NewHomeDetailFragment :
         }
     }
 
-    private fun refreshUnreadCounterBadge(badgeState: UnreadCounterBadgeView.State) {
-        views.spacesUnreadCounterBadge.render(badgeState)
-    }
-
     override fun onTapToReturnToCall() {
         callManager.getCurrentCall()?.let { call ->
             VectorCallActivity.newIntent(
@@ -490,5 +504,9 @@ class NewHomeDetailFragment :
 
     companion object {
         private const val HOME_ROOM_LIST_FRAGMENT_TAG = "TAG_HOME_ROOM_LIST"
+        private const val NAV_CHATS = 1
+        private const val NAV_PROJECTS = 2
+        private const val NAV_LIBRARY = 3
+        private const val NAV_PROFILE = 4
     }
-}
+        }
