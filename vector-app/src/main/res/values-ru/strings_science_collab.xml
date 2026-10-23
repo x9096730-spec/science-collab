@@ -7,4 +7,12 @@
     <string name="ftue_auth_use_case_option_one">Коллеги-исследователи</string>
     <string name="ftue_auth_use_case_option_two">Лаборатории и команды</string>
     <string name="ftue_auth_use_case_option_three">Научные сообщества</string>
+    <string name="ftue_auth_carousel_secure_title">Наука без границ.</string>
+    <string name="ftue_auth_carousel_secure_body">Общайтесь с исследователями со всего мира и развивайте идеи вместе.</string>
+    <string name="ftue_auth_carousel_control_title">Ваши данные под вашим контролем.</string>
+    <string name="ftue_auth_carousel_control_body">Сами решайте, где хранить научные обсуждения. Независимо и открыто.</string>
+    <string name="ftue_auth_carousel_encrypted_title">Безопасность по умолчанию.</string>
+    <string name="ftue_auth_carousel_encrypted_body">Сквозное шифрование без номера телефона. Без рекламы и сбора данных.</string>
+    <string name="ftue_auth_carousel_workplace_title">Создано для научных команд.</string>
+    <string name="ftue_auth_carousel_workplace_body">Science Collab объединяет лаборатории, группы и сообщества в одном защищённом пространстве.</string>
 </resources>
