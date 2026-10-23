@@ -17,7 +17,6 @@ import android.view.ViewGroup
 import android.widget.Button
 import android.widget.ImageView
 import android.widget.TextView
-import android.widget.Toast
 import androidx.core.view.isGone
 import androidx.core.view.isVisible
 import androidx.lifecycle.lifecycleScope
@@ -237,7 +236,11 @@ class NewHomeDetailFragment :
                     false
                 }
                 NAV_LIBRARY -> {
-                    Toast.makeText(requireContext(), getString(R.string.sc_nav_library_soon), Toast.LENGTH_SHORT).show()
+                    openUrlInChromeCustomTab(
+                            context = requireContext(),
+                            session = null,
+                            url = "https://openalex.org/works",
+                    )
                     false
                 }
                 NAV_PROFILE -> {
