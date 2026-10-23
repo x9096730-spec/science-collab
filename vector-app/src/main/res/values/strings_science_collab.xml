@@ -7,4 +7,12 @@
     <string name="ftue_auth_use_case_option_one">Fellow researchers</string>
     <string name="ftue_auth_use_case_option_two">Lab teams</string>
     <string name="ftue_auth_use_case_option_three">Scientific communities</string>
+    <string name="ftue_auth_carousel_secure_title">Science without borders.</string>
+    <string name="ftue_auth_carousel_secure_body">Connect with researchers worldwide and develop ideas together.</string>
+    <string name="ftue_auth_carousel_control_title">Your data, your control.</string>
+    <string name="ftue_auth_carousel_control_body">Decide where your research conversations are stored. Independent and open.</string>
+    <string name="ftue_auth_carousel_encrypted_title">Secure by design.</string>
+    <string name="ftue_auth_carousel_encrypted_body">End-to-end encryption, no phone number required. No ads, no data collection.</string>
+    <string name="ftue_auth_carousel_workplace_title">Built for research teams.</string>
+    <string name="ftue_auth_carousel_workplace_body">Science Collab brings labs, groups and communities into one secure space.</string>
 </resources>
