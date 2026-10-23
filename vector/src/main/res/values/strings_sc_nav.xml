@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="sc_nav_chats">Chats</string>
+    <string name="sc_nav_projects">Projects</string>
+    <string name="sc_nav_library">Library</string>
+    <string name="sc_nav_profile">Profile</string>
+    <string name="sc_nav_library_soon">The library is coming soon</string>
+</resources>
