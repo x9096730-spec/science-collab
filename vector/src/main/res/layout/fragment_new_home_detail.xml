@@ -52,7 +52,7 @@
     <androidx.coordinatorlayout.widget.CoordinatorLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintBottom_toTopOf="@id/scBottomNav"
         app:layout_constraintTop_toBottomOf="@id/syncStateView">
 
         <com.google.android.material.appbar.AppBarLayout
@@ -141,8 +141,7 @@
         app:layout_constraintEnd_toEndOf="@id/newLayoutCreateChatButton"
         app:layout_constraintStart_toStartOf="@id/newLayoutCreateChatButton"
         app:tint="?attr/colorPrimary"
-        tools:targetApi="lollipop_mr1"
-        tools:visibility="visible" />
+        tools:targetApi="lollipop_mr1" />
 
     <im.vector.app.features.home.room.list.UnreadCounterBadgeView
         android:id="@+id/spacesUnreadCounterBadge"
@@ -158,13 +157,13 @@
         android:paddingStart="4dp"
         android:paddingEnd="4dp"
         android:textColor="?colorOnError"
+        android:visibility="gone"
         app:layout_constraintCircle="@id/newLayoutOpenSpacesButton"
         app:layout_constraintCircleAngle="45"
         app:layout_constraintCircleRadius="24dp"
         tools:background="@drawable/bg_unread_highlight"
         tools:ignore="MissingConstraints"
-        tools:text="147"
-        tools:visibility="visible" />
+        tools:text="147" />
 
     <com.google.android.material.floatingactionbutton.FloatingActionButton
         android:id="@+id/newLayoutCreateChatButton"
@@ -176,10 +175,18 @@
         android:contentDescription="@string/a11y_create_message"
         android:src="@drawable/ic_new_chat"
         android:visibility="gone"
-        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintBottom_toTopOf="@id/scBottomNav"
         app:layout_constraintEnd_toEndOf="parent"
         tools:targetApi="lollipop_mr1"
         tools:visibility="visible" />
 
+    <com.google.android.material.bottomnavigation.BottomNavigationView
+        android:id="@+id/scBottomNav"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        app:labelVisibilityMode="labeled"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>
