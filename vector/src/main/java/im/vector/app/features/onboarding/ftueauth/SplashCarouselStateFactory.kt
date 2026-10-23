@@ -38,25 +38,25 @@ class SplashCarouselStateFactory @Inject constructor(
                         SplashCarouselState.Item(
                                 CommonStrings.ftue_auth_carousel_secure_title.colorTerminatingFullStop(com.google.android.material.R.attr.colorAccent),
                                 CommonStrings.ftue_auth_carousel_secure_body,
-                                hero(R.drawable.ic_splash_conversations, R.drawable.ic_splash_conversations_dark),
+                                hero(R.drawable.ic_sc_splash_network, R.drawable.ic_sc_splash_network),
                                 background(im.vector.lib.ui.styles.R.drawable.bg_carousel_page_1)
                         ),
                         SplashCarouselState.Item(
                                 CommonStrings.ftue_auth_carousel_control_title.colorTerminatingFullStop(com.google.android.material.R.attr.colorAccent),
                                 CommonStrings.ftue_auth_carousel_control_body,
-                                hero(R.drawable.ic_splash_control, R.drawable.ic_splash_control_dark),
+                                hero(R.drawable.ic_sc_splash_data, R.drawable.ic_sc_splash_data),
                                 background(im.vector.lib.ui.styles.R.drawable.bg_carousel_page_2)
                         ),
                         SplashCarouselState.Item(
                                 CommonStrings.ftue_auth_carousel_encrypted_title.colorTerminatingFullStop(com.google.android.material.R.attr.colorAccent),
                                 CommonStrings.ftue_auth_carousel_encrypted_body,
-                                hero(R.drawable.ic_splash_secure, R.drawable.ic_splash_secure_dark),
+                                hero(R.drawable.ic_sc_splash_shield, R.drawable.ic_sc_splash_shield),
                                 background(im.vector.lib.ui.styles.R.drawable.bg_carousel_page_3)
                         ),
                         SplashCarouselState.Item(
                                 collaborationTitle().colorTerminatingFullStop(com.google.android.material.R.attr.colorAccent),
                                 CommonStrings.ftue_auth_carousel_workplace_body,
-                                hero(R.drawable.ic_splash_collaboration, R.drawable.ic_splash_collaboration_dark),
+                                hero(R.drawable.ic_sc_splash_team, R.drawable.ic_sc_splash_team),
                                 background(im.vector.lib.ui.styles.R.drawable.bg_carousel_page_4)
                         )
                 )
