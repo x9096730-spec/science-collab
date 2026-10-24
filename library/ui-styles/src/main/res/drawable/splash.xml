@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The android:opacity=”opaque” line — this is critical in preventing a flash of black as your theme transitions. -->
+<!-- The android:opacity="opaque" line is critical in preventing a flash of black as the theme transitions. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android"
     android:opacity="opaque">
 
@@ -7,10 +7,10 @@
     <item android:drawable="?colorPrimary" />
 
     <!-- Centered logo -->
-    <item>
-        <bitmap
-            android:gravity="center"
-            android:src="@drawable/element_splash_white" />
-    </item>
+    <item
+        android:drawable="@drawable/ic_sc_splash_logo"
+        android:gravity="center"
+        android:width="140dp"
+        android:height="140dp" />
 
 </layer-list>
