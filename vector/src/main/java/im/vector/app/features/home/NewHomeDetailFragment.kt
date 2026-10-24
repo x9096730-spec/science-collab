@@ -24,6 +24,7 @@ import com.airbnb.mvrx.activityViewModel
 import com.airbnb.mvrx.fragmentViewModel
 import com.airbnb.mvrx.withState
 import com.google.android.material.appbar.AppBarLayout
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import dagger.hilt.android.AndroidEntryPoint
 import im.vector.app.R
 import im.vector.app.SpaceStateHandler
@@ -236,11 +237,7 @@ class NewHomeDetailFragment :
                     false
                 }
                 NAV_LIBRARY -> {
-                    openUrlInChromeCustomTab(
-                            context = requireContext(),
-                            session = null,
-                            url = "https://openalex.org/works",
-                    )
+                    showScienceToolsDialog()
                     false
                 }
                 NAV_PROFILE -> {
@@ -250,6 +247,29 @@ class NewHomeDetailFragment :
                 else -> true
             }
         }
+    }
+
+    private fun showScienceToolsDialog() {
+        val items = arrayOf(
+                getString(R.string.sc_tools_openalex),
+                getString(R.string.sc_tools_zotero),
+                getString(R.string.sc_tools_orcid),
+        )
+        val urls = arrayOf(
+                "https://openalex.org/works",
+                "https://www.zotero.org/mylibrary",
+                "https://orcid.org/",
+        )
+        MaterialAlertDialogBuilder(requireContext())
+                .setTitle(R.string.sc_tools_title)
+                .setItems(items) { _, which ->
+                    openUrlInChromeCustomTab(
+                            context = requireContext(),
+                            session = null,
+                            url = urls[which],
+                    )
+                }
+                .show()
     }
 
     private fun setCurrentSpace(spaceId: String?) {
