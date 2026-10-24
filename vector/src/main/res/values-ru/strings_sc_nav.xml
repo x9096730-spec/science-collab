@@ -5,4 +5,8 @@
     <string name="sc_nav_library">Библиотека</string>
     <string name="sc_nav_profile">Профиль</string>
     <string name="sc_nav_library_soon">Библиотека скоро появится</string>
+    <string name="sc_tools_title">Научные инструменты</string>
+    <string name="sc_tools_openalex">OpenAlex: поиск статей</string>
+    <string name="sc_tools_zotero">Zotero: моя библиотека</string>
+    <string name="sc_tools_orcid">ORCID: профиль исследователя</string>
 </resources>
