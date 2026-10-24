@@ -5,4 +5,8 @@
     <string name="sc_nav_library">Library</string>
     <string name="sc_nav_profile">Profile</string>
     <string name="sc_nav_library_soon">The library is coming soon</string>
+    <string name="sc_tools_title">Science tools</string>
+    <string name="sc_tools_openalex">OpenAlex: search papers</string>
+    <string name="sc_tools_zotero">Zotero: my library</string>
+    <string name="sc_tools_orcid">ORCID: researcher profile</string>
 </resources>
