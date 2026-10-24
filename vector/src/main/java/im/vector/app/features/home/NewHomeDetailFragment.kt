@@ -250,26 +250,27 @@ class NewHomeDetailFragment :
     }
 
     private fun showScienceToolsDialog() {
-        val items = arrayOf(
-                getString(R.string.sc_tools_openalex),
-                getString(R.string.sc_tools_zotero),
-                getString(R.string.sc_tools_orcid),
-        )
-        val urls = arrayOf(
-                "https://openalex.org/works",
-                "https://www.zotero.org/mylibrary",
-                "https://orcid.org/",
-        )
-        MaterialAlertDialogBuilder(requireContext())
-                .setTitle(R.string.sc_tools_title)
-                .setItems(items) { _, which ->
-                    openUrlInChromeCustomTab(
-                            context = requireContext(),
-                            session = null,
-                            url = urls[which],
-                    )
-                }
-                .show()
+        val content = layoutInflater.inflate(R.layout.dialog_sc_tools, null)
+        val dialog = MaterialAlertDialogBuilder(requireContext())
+                .setView(content)
+                .create()
+
+        fun bindTool(viewId: Int, url: String) {
+            content.findViewById<View>(viewId).setOnClickListener {
+                dialog.dismiss()
+                openUrlInChromeCustomTab(
+                        context = requireContext(),
+                        session = null,
+                        url = url,
+                )
+            }
+        }
+
+        bindTool(R.id.scToolOpenAlex, "https://openalex.org/works")
+        bindTool(R.id.scToolZotero, "https://www.zotero.org/mylibrary")
+        bindTool(R.id.scToolOrcid, "https://orcid.org/")
+        bindTool(R.id.scToolLatex, "https://www.overleaf.com/")
+        dialog.show()
     }
 
     private fun setCurrentSpace(spaceId: String?) {
