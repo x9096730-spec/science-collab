@@ -9,4 +9,12 @@
     <string name="sc_tools_openalex">OpenAlex: поиск статей</string>
     <string name="sc_tools_zotero">Zotero: моя библиотека</string>
     <string name="sc_tools_orcid">ORCID: профиль исследователя</string>
+    <string name="sc_tool_openalex_name">OpenAlex</string>
+    <string name="sc_tool_openalex_desc">Поиск по открытому каталогу научных работ</string>
+    <string name="sc_tool_zotero_name">Zotero</string>
+    <string name="sc_tool_zotero_desc">Ваша библиотека источников</string>
+    <string name="sc_tool_orcid_name">ORCID</string>
+    <string name="sc_tool_orcid_desc">Ваш профиль исследователя</string>
+    <string name="sc_tool_latex_name">LaTeX</string>
+    <string name="sc_tool_latex_desc">Статьи и формулы онлайн</string>
 </resources>
