@@ -57,8 +57,8 @@
         app:isPreferenceVisible="@bool/settings_root_legals_visible" />
 
     <im.vector.app.core.preference.VectorPreference
-        android:icon="@drawable/ic_settings_root_general"
-        android:title="Support the project / Поддержать проект">
+        android:icon="@drawable/ic_sc_heart"
+        android:title="@string/sc_support_title">
         <intent
             android:action="android.intent.action.VIEW"
             android:data="https://github.com/x9096730-spec/science-collab" />
