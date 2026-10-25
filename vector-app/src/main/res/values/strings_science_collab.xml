@@ -16,4 +16,6 @@
     <string name="ftue_auth_carousel_workplace_title">Built for research teams.</string>
     <string name="ftue_auth_carousel_workplace_body">Science Collab brings labs, groups and communities into one secure space.</string>
     <string name="cut_the_slack_from_teams">Built for research teams.</string>
+    <string name="change_space">Projects</string>
+    <string name="create_space">Create project</string>
 </resources>
