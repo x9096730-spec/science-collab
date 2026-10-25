@@ -12,6 +12,7 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import androidx.core.view.isGone
 import dagger.hilt.android.AndroidEntryPoint
 import im.vector.app.core.platform.VectorBaseBottomSheetDialogFragment
 import im.vector.app.databinding.FragmentNewChatBottomSheetBinding
@@ -29,6 +30,8 @@ class NewChatBottomSheet : VectorBaseBottomSheetDialogFragment<FragmentNewChatBo
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         initFABs()
+        // Science Collab: the public room directory is hidden.
+        views.exploreRooms.isGone = true
     }
 
     private fun initFABs() {
