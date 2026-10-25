@@ -15,4 +15,6 @@
     <string name="ftue_auth_carousel_encrypted_body">Сквозное шифрование без номера телефона. Без рекламы и сбора данных.</string>
     <string name="ftue_auth_carousel_workplace_title">Создано для научных команд.</string>
     <string name="ftue_auth_carousel_workplace_body">Science Collab объединяет лаборатории, группы и сообщества в одном защищённом пространстве.</string>
+    <string name="change_space">Проекты</string>
+    <string name="create_space">Создать проект</string>
 </resources>
