@@ -39,6 +39,9 @@ abstract class FilteredRoomFooterItem : VectorEpoxyModel<FilteredRoomFooterItem.
                 if (inSpace) CommonStrings.space_explore_activity_title else CommonStrings.room_filtering_footer_open_room_directory
         )
 
+        // Science Collab: the public room directory is hidden. Inside a project the button still explores that project.
+        holder.openRoomDirectory.isVisible = inSpace
+
         // The explore space screen will have a shortcut to create
         holder.createRoomButton.isVisible = !inSpace
     }
