@@ -59,6 +59,7 @@ class ScLibraryDialogFragment : DialogFragment() {
 
     private fun prefs() = requireContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
+    @Suppress("DEPRECATION")
     override fun onStart() {
         super.onStart()
         dialog?.window?.apply {
