@@ -68,6 +68,7 @@ import im.vector.app.features.attachments.toGroupedContentAttachmentData
 import im.vector.app.features.command.Command
 import im.vector.app.features.command.ParsedCommand
 import im.vector.app.features.home.AvatarRenderer
+import im.vector.app.features.home.ScFormulaDialogFragment
 import im.vector.app.features.home.room.detail.AutoCompleter
 import im.vector.app.features.home.room.detail.RoomDetailAction
 import im.vector.app.features.home.room.detail.RoomDetailAction.VoiceBroadcastAction
@@ -106,6 +107,7 @@ class MessageComposerFragment : VectorBaseFragment<FragmentComposerBinding>(), A
 
     companion object {
         private const val ircPattern = " (IRC)"
+        private const val FORMULA_TAG = "ScFormula"
     }
 
     @Inject lateinit var autoCompleterFactory: AutoCompleter.Factory
@@ -170,6 +172,10 @@ class MessageComposerFragment : VectorBaseFragment<FragmentComposerBinding>(), A
         setupBottomSheet()
         setupComposer()
         setupEmojiButton()
+
+        childFragmentManager.setFragmentResultListener(ScFormulaDialogFragment.RESULT_KEY, viewLifecycleOwner) { _, bundle ->
+            bundle.getString(ScFormulaDialogFragment.RESULT_LATEX)?.let { insertFormula(it) }
+        }
 
         views.composerLayout.isGone = vectorPreferences.isRichTextEditorEnabled()
         views.richTextComposerLayout.isVisible = vectorPreferences.isRichTextEditorEnabled()
@@ -407,6 +413,10 @@ class MessageComposerFragment : VectorBaseFragment<FragmentComposerBinding>(), A
                 SetLinkFragment.show(isTextSupported, initialLink, childFragmentManager)
             }
         }
+        composer.attachmentButton.setOnLongClickListener {
+            openFormulaEditor()
+            true
+        }
         (composer as? RichTextComposerLayout)?.pillDisplayHandler = PillDisplayHandler(
                 roomId = roomId,
                 getRoom = timelineViewModel::getRoom,
@@ -414,6 +424,26 @@ class MessageComposerFragment : VectorBaseFragment<FragmentComposerBinding>(), A
         ) { matrixItem: MatrixItem ->
             PillImageSpan(glideRequests, avatarRenderer, requireContext(), matrixItem)
         }
+    }
+
+    private fun openFormulaEditor() {
+        if (childFragmentManager.findFragmentByTag(FORMULA_TAG) != null) return
+        ScFormulaDialogFragment().show(childFragmentManager, FORMULA_TAG)
+    }
+
+    private fun insertFormula(latex: String) {
+        val formula = ScFormulaDialogFragment.wrap(latex) + " "
+        val editText = composer.editText
+        if ((composer as? RichTextComposerLayout)?.isTextFormattingEnabled == true) {
+            editText.append(formula)
+        } else {
+            val a = editText.selectionStart.coerceAtLeast(0)
+            val b = editText.selectionEnd.coerceAtLeast(0)
+            val from = minOf(a, b)
+            editText.text.replace(from, maxOf(a, b), formula)
+            editText.setSelection((from + formula.length).coerceAtMost(editText.text.length))
+        }
+        focusComposerAndShowKeyboard()
     }
 
     private fun initAutoCompleter(editText: EditText) {
