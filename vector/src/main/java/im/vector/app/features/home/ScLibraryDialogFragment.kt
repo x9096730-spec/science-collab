@@ -37,7 +37,8 @@ import java.net.URLEncoder
 
 private fun themeColor(ctx: Context, attr: Int, fallback: Int): Int {
     val tv = TypedValue()
-    return if (ctx.theme.resolveAttribute(attr, tv, true)) tv.data else fallback
+    if (!ctx.theme.resolveAttribute(attr, tv, true)) return fallback
+    return if (tv.resourceId != 0) ctx.getColor(tv.resourceId) else tv.data
 }
 
 private fun JSONObject.str(name: String): String = if (isNull(name)) "" else optString(name, "")
