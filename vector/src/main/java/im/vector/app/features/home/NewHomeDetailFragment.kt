@@ -270,6 +270,11 @@ class NewHomeDetailFragment :
         bindTool(R.id.scToolZotero, "https://www.zotero.org/mylibrary")
         bindTool(R.id.scToolOrcid, "https://orcid.org/")
         bindTool(R.id.scToolLatex, "https://www.overleaf.com/")
+
+        ScLibraryDialogFragment.attachEntry(content) {
+            dialog.dismiss()
+            ScLibraryDialogFragment().show(requireActivity().supportFragmentManager, "ScLibrary")
+        }
         dialog.show()
     }
 
