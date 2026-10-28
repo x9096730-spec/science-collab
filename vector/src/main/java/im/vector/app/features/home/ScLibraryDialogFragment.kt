@@ -1,6 +1,6 @@
 /*
  * Science Collab: "My literature" screen.
- * Stage 1: search open-access papers via OpenAlex and open their PDF.
+ * Stage 2: search open-access papers via OpenAlex, save PDFs inside the app, read them in the app.
  */
 
 package im.vector.app.features.home
@@ -24,9 +24,11 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import androidx.core.content.ContextCompat
 import androidx.fragment.app.DialogFragment
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import im.vector.app.R
 import im.vector.app.core.utils.openUrlInChromeCustomTab
 import org.json.JSONArray
@@ -38,7 +40,7 @@ import java.net.URLEncoder
 private fun themeColor(ctx: Context, attr: Int, fallback: Int): Int {
     val tv = TypedValue()
     if (!ctx.theme.resolveAttribute(attr, tv, true)) return fallback
-    return if (tv.resourceId != 0) ctx.getColor(tv.resourceId) else tv.data
+    return if (tv.resourceId != 0) ContextCompat.getColor(ctx, tv.resourceId) else tv.data
 }
 
 private fun JSONObject.str(name: String): String = if (isNull(name)) "" else optString(name, "")
@@ -46,6 +48,7 @@ private fun JSONObject.str(name: String): String = if (isNull(name)) "" else opt
 class ScLibraryDialogFragment : DialogFragment() {
 
     private data class Work(
+            val id: String,
             val title: String,
             val meta: String,
             val pdfUrl: String?,
@@ -53,10 +56,18 @@ class ScLibraryDialogFragment : DialogFragment() {
     )
 
     private val works = ArrayList<Work>()
-    private var listAdapter: WorkAdapter? = null
+    private var saved: List<ScSavedPaper> = emptyList()
+    private var downloading = false
+    private var searchAdapter: WorkAdapter? = null
+    private var savedAdapter: SavedAdapter? = null
     private var statusView: TextView? = null
+    private var savedEmptyView: TextView? = null
     private var searchBox: EditText? = null
     private var keyBox: EditText? = null
+    private var searchPane: View? = null
+    private var savedPane: View? = null
+    private var tabSearch: TextView? = null
+    private var tabSaved: TextView? = null
 
     private fun prefs() = requireContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
@@ -99,14 +110,32 @@ class ScLibraryDialogFragment : DialogFragment() {
         bar.addView(pill(ctx, "Закрыть", false) { dismiss() })
         root.addView(bar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
-        // API key
+        // Tabs
+        val tabs = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, dp(12), 0, dp(4))
+        }
+        val tabSearchView = pill(ctx, "Поиск", true) { showSavedTab(false) }
+        val tabSavedView = pill(ctx, "Сохранённые", false) { showSavedTab(true) }
+        tabSearch = tabSearchView
+        tabSaved = tabSavedView
+        tabs.addView(tabSearchView)
+        val tabGap = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        tabGap.marginStart = dp(8)
+        tabs.addView(tabSavedView, tabGap)
+        root.addView(tabs)
+
+        // Search pane
+        val searchLayout = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+        searchPane = searchLayout
+
         val keyHelp = TextView(ctx).apply {
             text = "Бесплатный ключ OpenAlex: openalex.org/settings/api. Он хранится только на этом телефоне."
             setTextColor(secondary)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
-            setPadding(0, dp(12), 0, dp(4))
+            setPadding(0, dp(8), 0, dp(4))
         }
-        root.addView(keyHelp)
+        searchLayout.addView(keyHelp)
 
         val keyRow = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -127,9 +156,8 @@ class ScLibraryDialogFragment : DialogFragment() {
             prefs().edit().putString(KEY_API, key.text.toString().trim()).apply()
             Toast.makeText(requireContext(), "Ключ сохранён", Toast.LENGTH_SHORT).show()
         })
-        root.addView(keyRow)
+        searchLayout.addView(keyRow)
 
-        // Search
         val searchRow = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -155,9 +183,8 @@ class ScLibraryDialogFragment : DialogFragment() {
         }
         searchRow.addView(search, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         searchRow.addView(pill(ctx, "Найти", true) { runSearch() })
-        root.addView(searchRow)
+        searchLayout.addView(searchRow)
 
-        // Status
         val status = TextView(ctx).apply {
             text = "Введите тему и нажмите «Найти». Показываются только открытые статьи."
             setTextColor(secondary)
@@ -165,18 +192,58 @@ class ScLibraryDialogFragment : DialogFragment() {
             setPadding(0, dp(4), 0, dp(8))
         }
         statusView = status
-        root.addView(status)
+        searchLayout.addView(status)
 
-        // Results
-        val adapter = WorkAdapter()
-        listAdapter = adapter
-        val list = RecyclerView(ctx).apply {
+        val workAdapter = WorkAdapter()
+        searchAdapter = workAdapter
+        val resultList = RecyclerView(ctx).apply {
             layoutManager = LinearLayoutManager(ctx)
-            this.adapter = adapter
+            this.adapter = workAdapter
         }
-        root.addView(list, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        searchLayout.addView(resultList, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        root.addView(searchLayout, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 
+        // Saved pane
+        val savedLayout = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+        }
+        savedPane = savedLayout
+        val empty = TextView(ctx).apply {
+            text = "Здесь появятся статьи, которые вы откроете из поиска. " +
+                    "Файлы хранятся внутри приложения и не попадают в галерею и загрузки телефона."
+            setTextColor(secondary)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+            setPadding(0, dp(16), 0, dp(8))
+        }
+        savedEmptyView = empty
+        savedLayout.addView(empty)
+        val savedListAdapter = SavedAdapter()
+        savedAdapter = savedListAdapter
+        val savedList = RecyclerView(ctx).apply {
+            layoutManager = LinearLayoutManager(ctx)
+            this.adapter = savedListAdapter
+        }
+        savedLayout.addView(savedList, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        root.addView(savedLayout, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+
+        refreshSaved()
         return root
+    }
+
+    private fun showSavedTab(show: Boolean) {
+        searchPane?.visibility = if (show) View.GONE else View.VISIBLE
+        savedPane?.visibility = if (show) View.VISIBLE else View.GONE
+        tabSearch?.let { stylePill(it, !show) }
+        tabSaved?.let { stylePill(it, show) }
+    }
+
+    private fun refreshSaved() {
+        saved = ScLibraryStore.list(requireContext())
+        tabSaved?.text = if (saved.isEmpty()) "Сохранённые" else "Сохранённые (${saved.size})"
+        savedEmptyView?.visibility = if (saved.isEmpty()) View.VISIBLE else View.GONE
+        savedAdapter?.notifyDataSetChanged()
+        searchAdapter?.notifyDataSetChanged()
     }
 
     private fun runSearch() {
@@ -210,7 +277,15 @@ class ScLibraryDialogFragment : DialogFragment() {
                     val parsed = parseWorks(body)
                     activity?.runOnUiThread {
                         if (isAdded) {
-                            showResults(parsed, if (parsed.isEmpty()) "Ничего не найдено." else "Найдено: ${parsed.size}")
+                            showResults(
+                                    parsed,
+                                    if (parsed.isEmpty()) {
+                                        "Ничего не найдено."
+                                    } else {
+                                        "Найдено: ${parsed.size}. Нажмите на статью, чтобы сохранить её в приложении и читать. " +
+                                                "Долгое нажатие откроет статью в браузере."
+                                    }
+                            )
                         }
                     }
                 } else {
@@ -251,7 +326,8 @@ class ScLibraryDialogFragment : DialogFragment() {
             val loc = o.optJSONObject("best_oa_location")
             val pdf = loc?.str("pdf_url")?.ifEmpty { null }
             val landing = loc?.str("landing_page_url")?.ifEmpty { null } ?: o.str("doi").ifEmpty { null }
-            result.add(Work(title, meta, pdf, landing))
+            val id = o.str("id").ifEmpty { pdf ?: (title + year) }
+            result.add(Work(id, title, meta, pdf, landing))
         }
         return result
     }
@@ -259,11 +335,61 @@ class ScLibraryDialogFragment : DialogFragment() {
     private fun showResults(list: List<Work>, message: String) {
         works.clear()
         works.addAll(list)
-        listAdapter?.notifyDataSetChanged()
+        searchAdapter?.notifyDataSetChanged()
         statusView?.text = message
     }
 
-    private fun openWork(work: Work) {
+    private fun onWorkClicked(work: Work) {
+        val existing = saved.firstOrNull { it.id == work.id }
+        if (existing != null) {
+            openReader(existing)
+            return
+        }
+        val pdf = work.pdfUrl
+        if (pdf.isNullOrEmpty()) {
+            Toast.makeText(requireContext(), "Прямого PDF нет, открываю страницу статьи", Toast.LENGTH_SHORT).show()
+            openInBrowser(work)
+            return
+        }
+        downloadAndOpen(work, pdf)
+    }
+
+    private fun downloadAndOpen(work: Work, pdfUrl: String) {
+        if (downloading) {
+            Toast.makeText(requireContext(), "Дождитесь окончания загрузки", Toast.LENGTH_SHORT).show()
+            return
+        }
+        downloading = true
+        statusView?.text = "Скачиваю: ${work.title}"
+        val appCtx = requireContext().applicationContext
+        Thread {
+            val error = ScLibraryStore.download(appCtx, work.id, pdfUrl, work.title, work.meta)
+            activity?.runOnUiThread {
+                downloading = false
+                if (!isAdded) return@runOnUiThread
+                if (error == null) {
+                    refreshSaved()
+                    statusView?.text = "Сохранено в приложении."
+                    saved.firstOrNull { it.id == work.id }?.let { openReader(it) }
+                } else {
+                    statusView?.text = "$error Долгое нажатие откроет статью в браузере."
+                }
+            }
+        }.start()
+    }
+
+    private fun openReader(paper: ScSavedPaper) {
+        val file = ScLibraryStore.fileOf(requireContext(), paper)
+        if (!file.exists()) {
+            ScLibraryStore.remove(requireContext(), paper)
+            refreshSaved()
+            Toast.makeText(requireContext(), "Файл не найден, скачайте статью заново", Toast.LENGTH_SHORT).show()
+            return
+        }
+        ScPdfReaderFragment.newInstance(file.absolutePath, paper.title).show(parentFragmentManager, "ScPdfReader")
+    }
+
+    private fun openInBrowser(work: Work) {
         val url = work.pdfUrl ?: work.landingUrl
         if (url.isNullOrEmpty()) {
             Toast.makeText(requireContext(), "У этой работы нет открытой ссылки", Toast.LENGTH_SHORT).show()
@@ -272,26 +398,45 @@ class ScLibraryDialogFragment : DialogFragment() {
         openUrlInChromeCustomTab(requireContext(), null, url)
     }
 
+    private fun confirmDelete(paper: ScSavedPaper) {
+        val appCtx = requireContext().applicationContext
+        MaterialAlertDialogBuilder(requireContext())
+                .setTitle("Удалить из библиотеки?")
+                .setMessage(paper.title)
+                .setPositiveButton("Удалить") { _, _ ->
+                    ScLibraryStore.remove(appCtx, paper)
+                    if (isAdded) refreshSaved()
+                }
+                .setNegativeButton("Отмена", null)
+                .show()
+    }
+
+    private fun stylePill(tv: TextView, filled: Boolean) {
+        val d = tv.resources.displayMetrics.density
+        tv.setTextColor(if (filled) Color.WHITE else ACCENT)
+        tv.background = GradientDrawable().apply {
+            cornerRadius = 14 * d
+            if (filled) {
+                setColor(ACCENT)
+            } else {
+                setColor(Color.TRANSPARENT)
+                setStroke((1.5f * d).toInt(), ACCENT)
+            }
+        }
+    }
+
     private fun pill(ctx: Context, label: String, filled: Boolean, onClick: () -> Unit): TextView {
         val d = ctx.resources.displayMetrics.density
-        return TextView(ctx).apply {
+        val tv = TextView(ctx).apply {
             text = label
             gravity = Gravity.CENTER
-            setTextColor(if (filled) Color.WHITE else ACCENT)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
             setPadding((16 * d).toInt(), (10 * d).toInt(), (16 * d).toInt(), (10 * d).toInt())
-            background = GradientDrawable().apply {
-                cornerRadius = 14 * d
-                if (filled) {
-                    setColor(ACCENT)
-                } else {
-                    setColor(Color.TRANSPARENT)
-                    setStroke((1.5f * d).toInt(), ACCENT)
-                }
-            }
             isClickable = true
             setOnClickListener { onClick() }
         }
+        stylePill(tv, filled)
+        return tv
     }
 
     private inner class WorkAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
@@ -324,9 +469,68 @@ class ScLibraryDialogFragment : DialogFragment() {
         override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
             val work = works[position]
             val col = holder.itemView as LinearLayout
+            val isSaved = saved.any { it.id == work.id }
+            val tag = when {
+                isSaved -> "  ·  ✓ сохранено"
+                work.pdfUrl != null -> "  ·  PDF"
+                else -> ""
+            }
             (col.getChildAt(0) as TextView).text = work.title
-            (col.getChildAt(1) as TextView).text = work.meta + if (work.pdfUrl != null) "  ·  PDF" else ""
-            col.setOnClickListener { openWork(work) }
+            (col.getChildAt(1) as TextView).text = work.meta + tag
+            col.setOnClickListener { onWorkClicked(work) }
+            col.setOnLongClickListener {
+                openInBrowser(work)
+                true
+            }
+        }
+    }
+
+    private inner class SavedAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
+
+        override fun getItemCount(): Int = saved.size
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
+            val ctx = parent.context
+            val d = ctx.resources.displayMetrics.density
+            val row = LinearLayout(ctx).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                layoutParams = RecyclerView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                setPadding(0, (12 * d).toInt(), 0, (12 * d).toInt())
+                isClickable = true
+            }
+            val col = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+            val t = TextView(ctx).apply {
+                setTextColor(themeColor(ctx, android.R.attr.textColorPrimary, Color.BLACK))
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+                typeface = Typeface.DEFAULT_BOLD
+            }
+            val m = TextView(ctx).apply {
+                setTextColor(themeColor(ctx, android.R.attr.textColorSecondary, Color.GRAY))
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            }
+            col.addView(t)
+            col.addView(m)
+            row.addView(col, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            val del = TextView(ctx).apply {
+                text = "✕"
+                setTextColor(themeColor(ctx, android.R.attr.textColorSecondary, Color.GRAY))
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f)
+                setPadding((16 * d).toInt(), (8 * d).toInt(), (4 * d).toInt(), (8 * d).toInt())
+                isClickable = true
+            }
+            row.addView(del)
+            return object : RecyclerView.ViewHolder(row) {}
+        }
+
+        override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
+            val paper = saved[position]
+            val row = holder.itemView as LinearLayout
+            val col = row.getChildAt(0) as LinearLayout
+            (col.getChildAt(0) as TextView).text = paper.title
+            (col.getChildAt(1) as TextView).text = paper.meta
+            row.setOnClickListener { openReader(paper) }
+            row.getChildAt(1).setOnClickListener { confirmDelete(paper) }
         }
     }
 
@@ -371,7 +575,7 @@ class ScLibraryDialogFragment : DialogFragment() {
                 typeface = Typeface.DEFAULT_BOLD
             }
             val desc = TextView(ctx).apply {
-                text = "Поиск и чтение открытых статей"
+                text = "Поиск, сохранение и чтение статей"
                 setTextColor(themeColor(ctx, android.R.attr.textColorSecondary, Color.GRAY))
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
             }
