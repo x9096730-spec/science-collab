@@ -19,6 +19,7 @@ import com.airbnb.epoxy.EpoxyModelClass
 import im.vector.app.R
 import im.vector.app.core.epoxy.onClick
 import im.vector.app.core.epoxy.onLongClickIgnoringLinks
+import im.vector.app.features.home.ScMath
 import im.vector.app.features.home.room.detail.timeline.TimelineEventController
 import im.vector.app.features.home.room.detail.timeline.tools.findPillsAndProcess
 import im.vector.app.features.home.room.detail.timeline.url.PreviewUrlRetriever
@@ -103,7 +104,7 @@ abstract class MessageTextItem : AbsMessageItem<MessageTextItem.Holder>() {
         renderSendState(messageView, messageView)
         messageView.onClick(attributes.itemClickListener)
         messageView.onLongClickIgnoringLinks(attributes.itemLongClickListener)
-        messageView.setTextWithEmojiSupport(message?.charSequence, bindingOptions)
+        messageView.setTextWithEmojiSupport(message?.charSequence?.let { ScMath.render(it) }, bindingOptions)
         markwonPlugins?.forEach { plugin -> plugin.afterSetText(messageView) }
     }
 
