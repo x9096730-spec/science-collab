@@ -1,7 +1,6 @@
 /*
  * Science Collab: "My library" screen.
- * Search open-access papers (OpenAlex, arXiv, Europe PMC) with endless scrolling,
- * save PDFs inside the app, read them in the app.
+ * Tabs: Search (OpenAlex, arXiv, Europe PMC) | Saved (PDFs inside the app) | Zotero.
  */
 
 package im.vector.app.features.home
@@ -70,8 +69,11 @@ class ScLibraryDialogFragment : DialogFragment() {
     private var keyBlock: View? = null
     private var searchPane: View? = null
     private var savedPane: View? = null
+    private var zoteroPane: View? = null
+    private var zoteroPanel: ScZoteroPanel? = null
     private var tabSearch: TextView? = null
     private var tabSaved: TextView? = null
+    private var tabZotero: TextView? = null
     private val sourceChips = LinkedHashMap<String, TextView>()
 
     private fun prefs() = requireContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -116,25 +118,34 @@ class ScLibraryDialogFragment : DialogFragment() {
         root.addView(bar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
         // Tabs
-        val tabs = LinearLayout(ctx).apply {
-            orientation = LinearLayout.HORIZONTAL
-            setPadding(0, dp(12), 0, dp(4))
+        val tabsRow = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+        val tabSearchView = pill(ctx, scTr("Поиск", "Search"), true) { showTab(TAB_SEARCH) }
+        val tabSavedView = pill(ctx, scTr("Сохранённые", "Saved"), false) { showTab(TAB_SAVED) }
+        val tabZoteroView = pill(ctx, "Zotero", false) { showTab(TAB_ZOTERO) }
+        for (tv in listOf(tabSearchView, tabSavedView, tabZoteroView)) {
+            tv.setPadding(dp(14), dp(9), dp(14), dp(9))
         }
-        val tabSearchView = pill(ctx, scTr("Поиск", "Search"), true) { showSavedTab(false) }
-        val tabSavedView = pill(ctx, scTr("Сохранённые", "Saved"), false) { showSavedTab(true) }
         tabSearch = tabSearchView
         tabSaved = tabSavedView
-        tabs.addView(tabSearchView)
-        val tabGap = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-        tabGap.marginStart = dp(8)
-        tabs.addView(tabSavedView, tabGap)
-        root.addView(tabs)
+        tabZotero = tabZoteroView
+        tabsRow.addView(tabSearchView)
+        val gap1 = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        gap1.marginStart = dp(8)
+        tabsRow.addView(tabSavedView, gap1)
+        val gap2 = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        gap2.marginStart = dp(8)
+        tabsRow.addView(tabZoteroView, gap2)
+        val tabsScroll = HorizontalScrollView(ctx).apply {
+            isHorizontalScrollBarEnabled = false
+            setPadding(0, dp(12), 0, dp(4))
+            addView(tabsRow)
+        }
+        root.addView(tabsScroll)
 
         // Search pane
         val searchLayout = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
         searchPane = searchLayout
 
-        // Source chips
         val sourceRow = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
         val sourceDefs = listOf(
                 SOURCE_OPENALEX to "OpenAlex",
@@ -157,7 +168,6 @@ class ScLibraryDialogFragment : DialogFragment() {
         sourceLp.topMargin = dp(8)
         searchLayout.addView(sourceScroll, sourceLp)
 
-        // API key block (OpenAlex only)
         val keyLayout = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
         keyBlock = keyLayout
         val keyHelp = TextView(ctx).apply {
@@ -254,9 +264,9 @@ class ScLibraryDialogFragment : DialogFragment() {
         savedPane = savedLayout
         val empty = TextView(ctx).apply {
             text = scTr(
-                    "Здесь появятся статьи, которые вы откроете из поиска. " +
+                    "Здесь появятся статьи, которые вы откроете из поиска или из Zotero. " +
                             "Файлы хранятся внутри приложения и не попадают в галерею и загрузки телефона.",
-                    "Papers you open from search will appear here. " +
+                    "Papers you open from search or from Zotero will appear here. " +
                             "Files are stored inside the app and do not appear in your gallery or downloads."
             )
             setTextColor(secondary)
@@ -273,6 +283,14 @@ class ScLibraryDialogFragment : DialogFragment() {
         }
         savedLayout.addView(savedList, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         root.addView(savedLayout, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+
+        // Zotero pane
+        val panel = ScZoteroPanel(this, { paper -> openReader(paper) }, { refreshSaved() })
+        zoteroPanel = panel
+        val zPane = panel.build(ctx)
+        zPane.visibility = View.GONE
+        zoteroPane = zPane
+        root.addView(zPane, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 
         refreshSaved()
         return root
@@ -297,8 +315,8 @@ class ScLibraryDialogFragment : DialogFragment() {
         val shown = works.size
         val totalText = if (total > shown) NumberFormat.getInstance().format(total) else shown.toString()
         return scTr(
-                "Показано $shown из $totalText. Нажмите на статью, чтобы читать. Долгое нажатие откроет её в браузере.",
-                "Showing $shown of $totalText. Tap a paper to read it. Long-press opens it in the browser."
+                "Показано $shown из $totalText. Нажмите на статью, чтобы читать. Долгое нажатие: меню (браузер, Zotero).",
+                "Showing $shown of $totalText. Tap a paper to read it. Long-press for the menu (browser, Zotero)."
         )
     }
 
@@ -314,11 +332,14 @@ class ScLibraryDialogFragment : DialogFragment() {
         statusView?.text = defaultStatus()
     }
 
-    private fun showSavedTab(show: Boolean) {
-        searchPane?.visibility = if (show) View.GONE else View.VISIBLE
-        savedPane?.visibility = if (show) View.VISIBLE else View.GONE
-        tabSearch?.let { stylePill(it, !show) }
-        tabSaved?.let { stylePill(it, show) }
+    private fun showTab(tab: Int) {
+        searchPane?.visibility = if (tab == TAB_SEARCH) View.VISIBLE else View.GONE
+        savedPane?.visibility = if (tab == TAB_SAVED) View.VISIBLE else View.GONE
+        zoteroPane?.visibility = if (tab == TAB_ZOTERO) View.VISIBLE else View.GONE
+        tabSearch?.let { stylePill(it, tab == TAB_SEARCH) }
+        tabSaved?.let { stylePill(it, tab == TAB_SAVED) }
+        tabZotero?.let { stylePill(it, tab == TAB_ZOTERO) }
+        if (tab == TAB_ZOTERO) zoteroPanel?.onShown()
     }
 
     private fun refreshSaved() {
@@ -439,18 +460,30 @@ class ScLibraryDialogFragment : DialogFragment() {
             val names = ArrayList<String>()
             val authors = o.optJSONArray("authorships")
             if (authors != null) {
-                for (j in 0 until minOf(authors.length(), 3)) {
+                for (j in 0 until minOf(authors.length(), 20)) {
                     val name = authors.optJSONObject(j)?.optJSONObject("author")?.str("display_name").orEmpty()
                     if (name.isNotEmpty()) names.add(name)
                 }
             }
             val year = if (o.isNull("publication_year")) "" else o.optInt("publication_year").toString()
-            val meta = listOf(names.joinToString(", "), year).filter { it.isNotEmpty() }.joinToString(" · ")
+            val meta = listOf(names.take(3).joinToString(", "), year).filter { it.isNotEmpty() }.joinToString(" · ")
             val loc = o.optJSONObject("best_oa_location")
             val pdf = loc?.str("pdf_url")?.ifEmpty { null }
-            val landing = loc?.str("landing_page_url")?.ifEmpty { null } ?: o.str("doi").ifEmpty { null }
+            val doiRaw = o.str("doi")
+            val landing = loc?.str("landing_page_url")?.ifEmpty { null } ?: doiRaw.ifEmpty { null }
             val id = o.str("id").ifEmpty { pdf ?: (title + year) }
-            result.add(ScFoundWork(id, title, meta, pdf, landing))
+            result.add(
+                    ScFoundWork(
+                            id = id,
+                            title = title,
+                            meta = meta,
+                            pdfUrl = pdf,
+                            landingUrl = landing,
+                            authors = names,
+                            year = year,
+                            doi = doiRaw.removePrefix("https://doi.org/"),
+                    )
+            )
         }
         val more = arr.length() >= ScSources.PAGE_SIZE && (count == 0L || page.toLong() * ScSources.PAGE_SIZE < count)
         return ScPage(result, count, null, more)
@@ -473,6 +506,24 @@ class ScLibraryDialogFragment : DialogFragment() {
             return
         }
         downloadAndOpen(work, pdf)
+    }
+
+    private fun showWorkMenu(work: ScFoundWork) {
+        val options = arrayOf(
+                scTr("Читать", "Read"),
+                scTr("Открыть в браузере", "Open in browser"),
+                scTr("Добавить в Zotero", "Add to Zotero"),
+        )
+        MaterialAlertDialogBuilder(requireContext())
+                .setTitle(work.title)
+                .setItems(options) { _, which ->
+                    when (which) {
+                        0 -> onWorkClicked(work)
+                        1 -> openInBrowser(work)
+                        else -> zoteroPanel?.addToZotero(work) { showTab(TAB_ZOTERO) }
+                    }
+                }
+                .show()
     }
 
     private fun downloadAndOpen(work: ScFoundWork, pdfUrl: String) {
@@ -498,8 +549,8 @@ class ScLibraryDialogFragment : DialogFragment() {
                     saved.firstOrNull { it.id == work.id }?.let { openReader(it) }
                 } else {
                     statusView?.text = error + scTr(
-                            " Долгое нажатие откроет статью в браузере.",
-                            " Long-press opens the article in the browser."
+                            " Долгое нажатие откроет меню.",
+                            " Long-press opens the menu."
                     )
                 }
             }
@@ -615,7 +666,7 @@ class ScLibraryDialogFragment : DialogFragment() {
             (col.getChildAt(1) as TextView).text = work.meta + tag
             col.setOnClickListener { onWorkClicked(work) }
             col.setOnLongClickListener {
-                openInBrowser(work)
+                showWorkMenu(work)
                 true
             }
         }
@@ -676,6 +727,9 @@ class ScLibraryDialogFragment : DialogFragment() {
         private const val SOURCE_OPENALEX = "openalex"
         private const val SOURCE_ARXIV = "arxiv"
         private const val SOURCE_EPMC = "epmc"
+        private const val TAB_SEARCH = 0
+        private const val TAB_SAVED = 1
+        private const val TAB_ZOTERO = 2
         private val ACCENT = Color.parseColor("#4338CA")
 
         /** Adds the "My library" card to the Science tools dialog. */
@@ -714,7 +768,7 @@ class ScLibraryDialogFragment : DialogFragment() {
                 typeface = Typeface.DEFAULT_BOLD
             }
             val desc = TextView(ctx).apply {
-                text = scTr("Поиск, сохранение и чтение статей", "Search, save and read papers")
+                text = scTr("Поиск, Zotero и чтение статей", "Search, Zotero and reading papers")
                 setTextColor(themeColor(ctx, android.R.attr.textColorSecondary, Color.GRAY))
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
             }
