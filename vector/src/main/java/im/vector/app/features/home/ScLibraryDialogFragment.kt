@@ -1,6 +1,7 @@
 /*
  * Science Collab: "My library" screen.
- * Search open-access papers (OpenAlex, arXiv, Europe PMC), save PDFs inside the app, read them in the app.
+ * Search open-access papers (OpenAlex, arXiv, Europe PMC) with endless scrolling,
+ * save PDFs inside the app, read them in the app.
  */
 
 package im.vector.app.features.home
@@ -32,11 +33,11 @@ import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import im.vector.app.R
 import im.vector.app.core.utils.openUrlInChromeCustomTab
-import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
+import java.text.NumberFormat
 
 private fun themeColor(ctx: Context, attr: Int, fallback: Int): Int {
     val tv = TypedValue()
@@ -48,13 +49,18 @@ private fun JSONObject.str(name: String): String = if (isNull(name)) "" else opt
 
 class ScLibraryDialogFragment : DialogFragment() {
 
-    private class SearchOutcome(val works: List<ScFoundWork>?, val error: String?)
+    private class SearchOutcome(val page: ScPage?, val error: String?)
 
     private val works = ArrayList<ScFoundWork>()
     private var saved: List<ScSavedPaper> = emptyList()
     private var downloading = false
     private var searching = false
     private var source = SOURCE_OPENALEX
+    private var lastQuery = ""
+    private var nextPage = 1
+    private var cursor = "*"
+    private var total = 0L
+    private var hasMore = false
     private var searchAdapter: WorkAdapter? = null
     private var savedAdapter: SavedAdapter? = null
     private var statusView: TextView? = null
@@ -204,14 +210,14 @@ class ScLibraryDialogFragment : DialogFragment() {
         searchBox = search
         search.setOnEditorActionListener { _, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_SEARCH) {
-                runSearch()
+                fetchPage(true)
                 true
             } else {
                 false
             }
         }
         searchRow.addView(search, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        searchRow.addView(pill(ctx, scTr("Найти", "Search"), true) { runSearch() })
+        searchRow.addView(pill(ctx, scTr("Найти", "Search"), true) { fetchPage(true) })
         searchLayout.addView(searchRow)
 
         val status = TextView(ctx).apply {
@@ -228,6 +234,14 @@ class ScLibraryDialogFragment : DialogFragment() {
         val resultList = RecyclerView(ctx).apply {
             layoutManager = LinearLayoutManager(ctx)
             this.adapter = workAdapter
+            addOnScrollListener(object : RecyclerView.OnScrollListener() {
+                override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
+                    val lm = recyclerView.layoutManager as? LinearLayoutManager ?: return
+                    if (dy > 0 && hasMore && !searching && lm.findLastVisibleItemPosition() >= works.size - 5) {
+                        fetchPage(false)
+                    }
+                }
+            })
         }
         searchLayout.addView(resultList, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         root.addView(searchLayout, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
@@ -279,12 +293,23 @@ class ScLibraryDialogFragment : DialogFragment() {
         )
     }
 
+    private fun resultsStatus(): String {
+        val shown = works.size
+        val totalText = if (total > shown) NumberFormat.getInstance().format(total) else shown.toString()
+        return scTr(
+                "Показано $shown из $totalText. Нажмите на статью, чтобы читать. Долгое нажатие откроет её в браузере.",
+                "Showing $shown of $totalText. Tap a paper to read it. Long-press opens it in the browser."
+        )
+    }
+
     private fun selectSource(s: String) {
         if (s == source) return
         source = s
         for ((k, chip) in sourceChips) stylePill(chip, k == s)
         keyBlock?.visibility = if (s == SOURCE_OPENALEX) View.VISIBLE else View.GONE
         works.clear()
+        hasMore = false
+        total = 0L
         searchAdapter?.notifyDataSetChanged()
         statusView?.text = defaultStatus()
     }
@@ -308,63 +333,79 @@ class ScLibraryDialogFragment : DialogFragment() {
         searchAdapter?.notifyDataSetChanged()
     }
 
-    private fun runSearch() {
-        val query = searchBox?.text?.toString()?.trim().orEmpty()
-        val key = keyBox?.text?.toString()?.trim().orEmpty()
+    /** reset = a new search; otherwise the next page of the current one is appended. */
+    private fun fetchPage(reset: Boolean) {
         val src = source
-        if (src == SOURCE_OPENALEX && key.isEmpty()) {
-            statusView?.text = scTr(
-                    "Сначала вставьте ключ OpenAlex и нажмите «Сохранить».",
-                    "Paste your OpenAlex key first and tap “Save”."
-            )
-            return
-        }
-        if (query.isEmpty()) {
-            statusView?.text = scTr("Введите тему, автора или название.", "Enter a topic, author or title.")
-            return
+        val key = keyBox?.text?.toString()?.trim().orEmpty()
+        val query = if (reset) searchBox?.text?.toString()?.trim().orEmpty() else lastQuery
+        if (reset) {
+            if (src == SOURCE_OPENALEX && key.isEmpty()) {
+                statusView?.text = scTr(
+                        "Сначала вставьте ключ OpenAlex и нажмите «Сохранить».",
+                        "Paste your OpenAlex key first and tap “Save”."
+                )
+                return
+            }
+            if (query.isEmpty()) {
+                statusView?.text = scTr("Введите тему, автора или название.", "Enter a topic, author or title.")
+                return
+            }
         }
         if (searching) return
-        if (src == SOURCE_OPENALEX) prefs().edit().putString(KEY_API, key).apply()
+        if (reset && src == SOURCE_OPENALEX) prefs().edit().putString(KEY_API, key).apply()
         searching = true
-        statusView?.text = scTr("Поиск…", "Searching…")
+        if (reset) {
+            lastQuery = query
+            works.clear()
+            nextPage = 1
+            cursor = "*"
+            total = 0L
+            hasMore = false
+            searchAdapter?.notifyDataSetChanged()
+            statusView?.text = scTr("Поиск…", "Searching…")
+        } else {
+            statusView?.text = scTr("Загружаю ещё…", "Loading more…")
+        }
+        val startOffset = works.size
+        val pageNo = nextPage
+        val cur = cursor
         Thread {
             val outcome = try {
                 when (src) {
-                    SOURCE_ARXIV -> SearchOutcome(ScSources.searchArxiv(query), null)
-                    SOURCE_EPMC -> SearchOutcome(ScSources.searchEuropePmc(query), null)
-                    else -> searchOpenAlex(query, key)
+                    SOURCE_ARXIV -> SearchOutcome(ScSources.searchArxiv(query, startOffset), null)
+                    SOURCE_EPMC -> SearchOutcome(ScSources.searchEuropePmc(query, cur), null)
+                    else -> searchOpenAlex(query, key, pageNo)
                 }
             } catch (e: Exception) {
                 SearchOutcome(null, scTr("Нет соединения или ошибка запроса.", "No connection or request error."))
             }
             activity?.runOnUiThread {
                 searching = false
-                if (!isAdded || src != source) return@runOnUiThread
-                val list = outcome.works
-                if (list == null) {
-                    showResults(emptyList(), outcome.error ?: scTr("Ошибка запроса.", "Request error."))
-                } else {
-                    showResults(
-                            list,
-                            if (list.isEmpty()) {
-                                scTr("Ничего не найдено.", "Nothing found.")
-                            } else {
-                                scTr(
-                                        "Найдено: ${list.size}. Нажмите на статью, чтобы сохранить её в приложении и читать. " +
-                                                "Долгое нажатие откроет статью в браузере.",
-                                        "Found: ${list.size}. Tap a paper to save it in the app and read it. " +
-                                                "Long-press opens it in the browser."
-                                )
-                            }
-                    )
+                if (!isAdded || src != source || query != lastQuery) return@runOnUiThread
+                val result = outcome.page
+                if (result == null) {
+                    statusView?.text = outcome.error ?: scTr("Ошибка запроса.", "Request error.")
+                    return@runOnUiThread
                 }
+                val before = works.size
+                works.addAll(result.works)
+                total = result.total
+                hasMore = result.hasMore
+                if (src == SOURCE_OPENALEX) nextPage = pageNo + 1
+                if (src == SOURCE_EPMC) cursor = result.nextCursor ?: cur
+                if (reset) {
+                    searchAdapter?.notifyDataSetChanged()
+                } else {
+                    searchAdapter?.notifyItemRangeInserted(before, result.works.size)
+                }
+                statusView?.text = if (works.isEmpty()) scTr("Ничего не найдено.", "Nothing found.") else resultsStatus()
             }
         }.start()
     }
 
-    private fun searchOpenAlex(query: String, key: String): SearchOutcome {
+    private fun searchOpenAlex(query: String, key: String, page: Int): SearchOutcome {
         val url = "https://api.openalex.org/works?search=" + URLEncoder.encode(query, "UTF-8") +
-                "&filter=open_access.is_oa:true&per-page=25" +
+                "&filter=open_access.is_oa:true&per-page=" + ScSources.PAGE_SIZE + "&page=" + page +
                 "&select=id,title,publication_year,authorships,best_oa_location,doi" +
                 "&api_key=" + URLEncoder.encode(key, "UTF-8")
         val conn = URL(url).openConnection() as HttpURLConnection
@@ -375,7 +416,7 @@ class ScLibraryDialogFragment : DialogFragment() {
         val stream = if (code in 200..299) conn.inputStream else conn.errorStream
         val body = stream?.bufferedReader()?.use { it.readText() } ?: ""
         conn.disconnect()
-        if (code in 200..299) return SearchOutcome(parseWorks(body), null)
+        if (code in 200..299) return SearchOutcome(parseWorks(body, page), null)
         val message = when (code) {
             401, 403 -> scTr("Ключ не принят. Проверьте ключ.", "Key rejected. Check your key.")
             409, 429 -> scTr(
@@ -387,10 +428,11 @@ class ScLibraryDialogFragment : DialogFragment() {
         return SearchOutcome(null, message)
     }
 
-    private fun parseWorks(body: String): List<ScFoundWork> {
-        val result = ArrayList<ScFoundWork>()
+    private fun parseWorks(body: String, page: Int): ScPage {
         val root = JSONObject(body)
-        val arr: JSONArray = root.optJSONArray("results") ?: return result
+        val count = root.optJSONObject("meta")?.optLong("count", 0L) ?: 0L
+        val arr = root.optJSONArray("results") ?: return ScPage(emptyList(), count, null, false)
+        val result = ArrayList<ScFoundWork>()
         for (i in 0 until arr.length()) {
             val o = arr.optJSONObject(i) ?: continue
             val title = o.str("title").ifEmpty { scTr("Без названия", "Untitled") }
@@ -410,14 +452,8 @@ class ScLibraryDialogFragment : DialogFragment() {
             val id = o.str("id").ifEmpty { pdf ?: (title + year) }
             result.add(ScFoundWork(id, title, meta, pdf, landing))
         }
-        return result
-    }
-
-    private fun showResults(list: List<ScFoundWork>, message: String) {
-        works.clear()
-        works.addAll(list)
-        searchAdapter?.notifyDataSetChanged()
-        statusView?.text = message
+        val more = arr.length() >= ScSources.PAGE_SIZE && (count == 0L || page.toLong() * ScSources.PAGE_SIZE < count)
+        return ScPage(result, count, null, more)
     }
 
     private fun onWorkClicked(work: ScFoundWork) {
@@ -575,7 +611,7 @@ class ScLibraryDialogFragment : DialogFragment() {
                 work.pdfUrl != null -> "  ·  PDF"
                 else -> ""
             }
-            (col.getChildAt(0) as TextView).text = work.title
+            (col.getChildAt(0) as TextView).text = ScMath.render(work.title)
             (col.getChildAt(1) as TextView).text = work.meta + tag
             col.setOnClickListener { onWorkClicked(work) }
             col.setOnLongClickListener {
@@ -627,7 +663,7 @@ class ScLibraryDialogFragment : DialogFragment() {
             val paper = saved[position]
             val row = holder.itemView as LinearLayout
             val col = row.getChildAt(0) as LinearLayout
-            (col.getChildAt(0) as TextView).text = paper.title
+            (col.getChildAt(0) as TextView).text = ScMath.render(paper.title)
             (col.getChildAt(1) as TextView).text = paper.meta
             row.setOnClickListener { openReader(paper) }
             row.getChildAt(1).setOnClickListener { confirmDelete(paper) }
