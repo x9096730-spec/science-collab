@@ -1,6 +1,6 @@
 /*
- * Science Collab: "My literature" screen.
- * Stage 2: search open-access papers via OpenAlex, save PDFs inside the app, read them in the app.
+ * Science Collab: "My library" screen.
+ * Search open-access papers (OpenAlex, arXiv, Europe PMC), save PDFs inside the app, read them in the app.
  */
 
 package im.vector.app.features.home
@@ -20,6 +20,7 @@ import android.view.ViewGroup
 import android.view.WindowManager
 import android.view.inputmethod.EditorInfo
 import android.widget.EditText
+import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -47,27 +48,25 @@ private fun JSONObject.str(name: String): String = if (isNull(name)) "" else opt
 
 class ScLibraryDialogFragment : DialogFragment() {
 
-    private data class Work(
-            val id: String,
-            val title: String,
-            val meta: String,
-            val pdfUrl: String?,
-            val landingUrl: String?,
-    )
+    private class SearchOutcome(val works: List<ScFoundWork>?, val error: String?)
 
-    private val works = ArrayList<Work>()
+    private val works = ArrayList<ScFoundWork>()
     private var saved: List<ScSavedPaper> = emptyList()
     private var downloading = false
+    private var searching = false
+    private var source = SOURCE_OPENALEX
     private var searchAdapter: WorkAdapter? = null
     private var savedAdapter: SavedAdapter? = null
     private var statusView: TextView? = null
     private var savedEmptyView: TextView? = null
     private var searchBox: EditText? = null
     private var keyBox: EditText? = null
+    private var keyBlock: View? = null
     private var searchPane: View? = null
     private var savedPane: View? = null
     private var tabSearch: TextView? = null
     private var tabSaved: TextView? = null
+    private val sourceChips = LinkedHashMap<String, TextView>()
 
     private fun prefs() = requireContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
@@ -101,13 +100,13 @@ class ScLibraryDialogFragment : DialogFragment() {
             gravity = Gravity.CENTER_VERTICAL
         }
         val title = TextView(ctx).apply {
-            text = "Моя литература"
+            text = scTr("Моя литература", "My library")
             setTextColor(primary)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f)
             typeface = Typeface.DEFAULT_BOLD
         }
         bar.addView(title, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        bar.addView(pill(ctx, "Закрыть", false) { dismiss() })
+        bar.addView(pill(ctx, scTr("Закрыть", "Close"), false) { dismiss() })
         root.addView(bar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
         // Tabs
@@ -115,8 +114,8 @@ class ScLibraryDialogFragment : DialogFragment() {
             orientation = LinearLayout.HORIZONTAL
             setPadding(0, dp(12), 0, dp(4))
         }
-        val tabSearchView = pill(ctx, "Поиск", true) { showSavedTab(false) }
-        val tabSavedView = pill(ctx, "Сохранённые", false) { showSavedTab(true) }
+        val tabSearchView = pill(ctx, scTr("Поиск", "Search"), true) { showSavedTab(false) }
+        val tabSavedView = pill(ctx, scTr("Сохранённые", "Saved"), false) { showSavedTab(true) }
         tabSearch = tabSearchView
         tabSaved = tabSavedView
         tabs.addView(tabSearchView)
@@ -129,20 +128,49 @@ class ScLibraryDialogFragment : DialogFragment() {
         val searchLayout = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
         searchPane = searchLayout
 
+        // Source chips
+        val sourceRow = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+        val sourceDefs = listOf(
+                SOURCE_OPENALEX to "OpenAlex",
+                SOURCE_ARXIV to "arXiv",
+                SOURCE_EPMC to "Europe PMC",
+        )
+        for ((srcKey, srcLabel) in sourceDefs) {
+            val chip = pill(ctx, srcLabel, srcKey == source) { selectSource(srcKey) }
+            chip.setPadding(dp(12), dp(8), dp(12), dp(8))
+            sourceChips[srcKey] = chip
+            val chipLp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            chipLp.marginEnd = dp(8)
+            sourceRow.addView(chip, chipLp)
+        }
+        val sourceScroll = HorizontalScrollView(ctx).apply {
+            isHorizontalScrollBarEnabled = false
+            addView(sourceRow)
+        }
+        val sourceLp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        sourceLp.topMargin = dp(8)
+        searchLayout.addView(sourceScroll, sourceLp)
+
+        // API key block (OpenAlex only)
+        val keyLayout = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+        keyBlock = keyLayout
         val keyHelp = TextView(ctx).apply {
-            text = "Бесплатный ключ OpenAlex: openalex.org/settings/api. Он хранится только на этом телефоне."
+            text = scTr(
+                    "Бесплатный ключ OpenAlex: openalex.org/settings/api. Он хранится только на этом телефоне.",
+                    "Free OpenAlex key: openalex.org/settings/api. It is stored only on this phone."
+            )
             setTextColor(secondary)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
             setPadding(0, dp(8), 0, dp(4))
         }
-        searchLayout.addView(keyHelp)
+        keyLayout.addView(keyHelp)
 
         val keyRow = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
         val key = EditText(ctx).apply {
-            hint = "Ключ OpenAlex"
+            hint = scTr("Ключ OpenAlex", "OpenAlex key")
             setSingleLine(true)
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
             setText(prefs().getString(KEY_API, "") ?: "")
@@ -152,11 +180,12 @@ class ScLibraryDialogFragment : DialogFragment() {
         }
         keyBox = key
         keyRow.addView(key, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        keyRow.addView(pill(ctx, "Сохранить", false) {
+        keyRow.addView(pill(ctx, scTr("Сохранить", "Save"), false) {
             prefs().edit().putString(KEY_API, key.text.toString().trim()).apply()
-            Toast.makeText(requireContext(), "Ключ сохранён", Toast.LENGTH_SHORT).show()
+            Toast.makeText(requireContext(), scTr("Ключ сохранён", "Key saved"), Toast.LENGTH_SHORT).show()
         })
-        searchLayout.addView(keyRow)
+        keyLayout.addView(keyRow)
+        searchLayout.addView(keyLayout)
 
         val searchRow = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -164,7 +193,7 @@ class ScLibraryDialogFragment : DialogFragment() {
             setPadding(0, dp(8), 0, dp(4))
         }
         val search = EditText(ctx).apply {
-            hint = "Тема, автор или название"
+            hint = scTr("Тема, автор или название", "Topic, author or title")
             setSingleLine(true)
             inputType = InputType.TYPE_CLASS_TEXT
             imeOptions = EditorInfo.IME_ACTION_SEARCH
@@ -182,11 +211,11 @@ class ScLibraryDialogFragment : DialogFragment() {
             }
         }
         searchRow.addView(search, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        searchRow.addView(pill(ctx, "Найти", true) { runSearch() })
+        searchRow.addView(pill(ctx, scTr("Найти", "Search"), true) { runSearch() })
         searchLayout.addView(searchRow)
 
         val status = TextView(ctx).apply {
-            text = "Введите тему и нажмите «Найти». Показываются только открытые статьи."
+            text = defaultStatus()
             setTextColor(secondary)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
             setPadding(0, dp(4), 0, dp(8))
@@ -210,8 +239,12 @@ class ScLibraryDialogFragment : DialogFragment() {
         }
         savedPane = savedLayout
         val empty = TextView(ctx).apply {
-            text = "Здесь появятся статьи, которые вы откроете из поиска. " +
-                    "Файлы хранятся внутри приложения и не попадают в галерею и загрузки телефона."
+            text = scTr(
+                    "Здесь появятся статьи, которые вы откроете из поиска. " +
+                            "Файлы хранятся внутри приложения и не попадают в галерею и загрузки телефона.",
+                    "Papers you open from search will appear here. " +
+                            "Files are stored inside the app and do not appear in your gallery or downloads."
+            )
             setTextColor(secondary)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
             setPadding(0, dp(16), 0, dp(8))
@@ -231,6 +264,31 @@ class ScLibraryDialogFragment : DialogFragment() {
         return root
     }
 
+    private fun defaultStatus(): String = when (source) {
+        SOURCE_ARXIV -> scTr(
+                "arXiv: физика, математика, информатика и другие науки. Все статьи открыты.",
+                "arXiv: physics, mathematics, computer science and more. All papers are open."
+        )
+        SOURCE_EPMC -> scTr(
+                "Europe PMC: медицина и биология. Только статьи с открытым PDF.",
+                "Europe PMC: medicine and biology. Only papers with an open PDF."
+        )
+        else -> scTr(
+                "Введите тему и нажмите «Найти». Показываются только открытые статьи.",
+                "Enter a topic and tap “Search”. Only open-access papers are shown."
+        )
+    }
+
+    private fun selectSource(s: String) {
+        if (s == source) return
+        source = s
+        for ((k, chip) in sourceChips) stylePill(chip, k == s)
+        keyBlock?.visibility = if (s == SOURCE_OPENALEX) View.VISIBLE else View.GONE
+        works.clear()
+        searchAdapter?.notifyDataSetChanged()
+        statusView?.text = defaultStatus()
+    }
+
     private fun showSavedTab(show: Boolean) {
         searchPane?.visibility = if (show) View.GONE else View.VISIBLE
         savedPane?.visibility = if (show) View.VISIBLE else View.GONE
@@ -240,7 +298,11 @@ class ScLibraryDialogFragment : DialogFragment() {
 
     private fun refreshSaved() {
         saved = ScLibraryStore.list(requireContext())
-        tabSaved?.text = if (saved.isEmpty()) "Сохранённые" else "Сохранённые (${saved.size})"
+        tabSaved?.text = if (saved.isEmpty()) {
+            scTr("Сохранённые", "Saved")
+        } else {
+            scTr("Сохранённые (${saved.size})", "Saved (${saved.size})")
+        }
         savedEmptyView?.visibility = if (saved.isEmpty()) View.VISIBLE else View.GONE
         savedAdapter?.notifyDataSetChanged()
         searchAdapter?.notifyDataSetChanged()
@@ -249,70 +311,89 @@ class ScLibraryDialogFragment : DialogFragment() {
     private fun runSearch() {
         val query = searchBox?.text?.toString()?.trim().orEmpty()
         val key = keyBox?.text?.toString()?.trim().orEmpty()
-        if (key.isEmpty()) {
-            statusView?.text = "Сначала вставьте ключ OpenAlex и нажмите «Сохранить»."
+        val src = source
+        if (src == SOURCE_OPENALEX && key.isEmpty()) {
+            statusView?.text = scTr(
+                    "Сначала вставьте ключ OpenAlex и нажмите «Сохранить».",
+                    "Paste your OpenAlex key first and tap “Save”."
+            )
             return
         }
         if (query.isEmpty()) {
-            statusView?.text = "Введите тему, автора или название."
+            statusView?.text = scTr("Введите тему, автора или название.", "Enter a topic, author or title.")
             return
         }
-        prefs().edit().putString(KEY_API, key).apply()
-        statusView?.text = "Поиск…"
+        if (searching) return
+        if (src == SOURCE_OPENALEX) prefs().edit().putString(KEY_API, key).apply()
+        searching = true
+        statusView?.text = scTr("Поиск…", "Searching…")
         Thread {
-            try {
-                val url = "https://api.openalex.org/works?search=" + URLEncoder.encode(query, "UTF-8") +
-                        "&filter=open_access.is_oa:true&per-page=25" +
-                        "&select=id,title,publication_year,authorships,best_oa_location,doi" +
-                        "&api_key=" + URLEncoder.encode(key, "UTF-8")
-                val conn = URL(url).openConnection() as HttpURLConnection
-                conn.connectTimeout = 15000
-                conn.readTimeout = 20000
-                conn.setRequestProperty("Accept", "application/json")
-                val code = conn.responseCode
-                val stream = if (code in 200..299) conn.inputStream else conn.errorStream
-                val body = stream?.bufferedReader()?.use { it.readText() } ?: ""
-                conn.disconnect()
-                if (code in 200..299) {
-                    val parsed = parseWorks(body)
-                    activity?.runOnUiThread {
-                        if (isAdded) {
-                            showResults(
-                                    parsed,
-                                    if (parsed.isEmpty()) {
-                                        "Ничего не найдено."
-                                    } else {
-                                        "Найдено: ${parsed.size}. Нажмите на статью, чтобы сохранить её в приложении и читать. " +
-                                                "Долгое нажатие откроет статью в браузере."
-                                    }
-                            )
-                        }
-                    }
-                } else {
-                    val message = when (code) {
-                        401, 403 -> "Ключ не принят. Проверьте ключ."
-                        409, 429 -> "Нужен действующий ключ или исчерпан дневной лимит."
-                        else -> "Ошибка сервера (код $code)."
-                    }
-                    activity?.runOnUiThread {
-                        if (isAdded) showResults(emptyList(), message)
-                    }
+            val outcome = try {
+                when (src) {
+                    SOURCE_ARXIV -> SearchOutcome(ScSources.searchArxiv(query), null)
+                    SOURCE_EPMC -> SearchOutcome(ScSources.searchEuropePmc(query), null)
+                    else -> searchOpenAlex(query, key)
                 }
             } catch (e: Exception) {
-                activity?.runOnUiThread {
-                    if (isAdded) showResults(emptyList(), "Нет соединения или ошибка запроса.")
+                SearchOutcome(null, scTr("Нет соединения или ошибка запроса.", "No connection or request error."))
+            }
+            activity?.runOnUiThread {
+                searching = false
+                if (!isAdded || src != source) return@runOnUiThread
+                val list = outcome.works
+                if (list == null) {
+                    showResults(emptyList(), outcome.error ?: scTr("Ошибка запроса.", "Request error."))
+                } else {
+                    showResults(
+                            list,
+                            if (list.isEmpty()) {
+                                scTr("Ничего не найдено.", "Nothing found.")
+                            } else {
+                                scTr(
+                                        "Найдено: ${list.size}. Нажмите на статью, чтобы сохранить её в приложении и читать. " +
+                                                "Долгое нажатие откроет статью в браузере.",
+                                        "Found: ${list.size}. Tap a paper to save it in the app and read it. " +
+                                                "Long-press opens it in the browser."
+                                )
+                            }
+                    )
                 }
             }
         }.start()
     }
 
-    private fun parseWorks(body: String): List<Work> {
-        val result = ArrayList<Work>()
+    private fun searchOpenAlex(query: String, key: String): SearchOutcome {
+        val url = "https://api.openalex.org/works?search=" + URLEncoder.encode(query, "UTF-8") +
+                "&filter=open_access.is_oa:true&per-page=25" +
+                "&select=id,title,publication_year,authorships,best_oa_location,doi" +
+                "&api_key=" + URLEncoder.encode(key, "UTF-8")
+        val conn = URL(url).openConnection() as HttpURLConnection
+        conn.connectTimeout = 15000
+        conn.readTimeout = 20000
+        conn.setRequestProperty("Accept", "application/json")
+        val code = conn.responseCode
+        val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+        val body = stream?.bufferedReader()?.use { it.readText() } ?: ""
+        conn.disconnect()
+        if (code in 200..299) return SearchOutcome(parseWorks(body), null)
+        val message = when (code) {
+            401, 403 -> scTr("Ключ не принят. Проверьте ключ.", "Key rejected. Check your key.")
+            409, 429 -> scTr(
+                    "Нужен действующий ключ или исчерпан дневной лимит.",
+                    "A valid key is required or the daily limit is exhausted."
+            )
+            else -> scTr("Ошибка сервера (код $code).", "Server error (code $code).")
+        }
+        return SearchOutcome(null, message)
+    }
+
+    private fun parseWorks(body: String): List<ScFoundWork> {
+        val result = ArrayList<ScFoundWork>()
         val root = JSONObject(body)
         val arr: JSONArray = root.optJSONArray("results") ?: return result
         for (i in 0 until arr.length()) {
             val o = arr.optJSONObject(i) ?: continue
-            val title = o.str("title").ifEmpty { "Без названия" }
+            val title = o.str("title").ifEmpty { scTr("Без названия", "Untitled") }
             val names = ArrayList<String>()
             val authors = o.optJSONArray("authorships")
             if (authors != null) {
@@ -327,19 +408,19 @@ class ScLibraryDialogFragment : DialogFragment() {
             val pdf = loc?.str("pdf_url")?.ifEmpty { null }
             val landing = loc?.str("landing_page_url")?.ifEmpty { null } ?: o.str("doi").ifEmpty { null }
             val id = o.str("id").ifEmpty { pdf ?: (title + year) }
-            result.add(Work(id, title, meta, pdf, landing))
+            result.add(ScFoundWork(id, title, meta, pdf, landing))
         }
         return result
     }
 
-    private fun showResults(list: List<Work>, message: String) {
+    private fun showResults(list: List<ScFoundWork>, message: String) {
         works.clear()
         works.addAll(list)
         searchAdapter?.notifyDataSetChanged()
         statusView?.text = message
     }
 
-    private fun onWorkClicked(work: Work) {
+    private fun onWorkClicked(work: ScFoundWork) {
         val existing = saved.firstOrNull { it.id == work.id }
         if (existing != null) {
             openReader(existing)
@@ -347,20 +428,28 @@ class ScLibraryDialogFragment : DialogFragment() {
         }
         val pdf = work.pdfUrl
         if (pdf.isNullOrEmpty()) {
-            Toast.makeText(requireContext(), "Прямого PDF нет, открываю страницу статьи", Toast.LENGTH_SHORT).show()
+            Toast.makeText(
+                    requireContext(),
+                    scTr("Прямого PDF нет, открываю страницу статьи", "No direct PDF, opening the article page"),
+                    Toast.LENGTH_SHORT
+            ).show()
             openInBrowser(work)
             return
         }
         downloadAndOpen(work, pdf)
     }
 
-    private fun downloadAndOpen(work: Work, pdfUrl: String) {
+    private fun downloadAndOpen(work: ScFoundWork, pdfUrl: String) {
         if (downloading) {
-            Toast.makeText(requireContext(), "Дождитесь окончания загрузки", Toast.LENGTH_SHORT).show()
+            Toast.makeText(
+                    requireContext(),
+                    scTr("Дождитесь окончания загрузки", "Wait for the download to finish"),
+                    Toast.LENGTH_SHORT
+            ).show()
             return
         }
         downloading = true
-        statusView?.text = "Скачиваю: ${work.title}"
+        statusView?.text = scTr("Скачиваю: ${work.title}", "Downloading: ${work.title}")
         val appCtx = requireContext().applicationContext
         Thread {
             val error = ScLibraryStore.download(appCtx, work.id, pdfUrl, work.title, work.meta)
@@ -369,10 +458,13 @@ class ScLibraryDialogFragment : DialogFragment() {
                 if (!isAdded) return@runOnUiThread
                 if (error == null) {
                     refreshSaved()
-                    statusView?.text = "Сохранено в приложении."
+                    statusView?.text = scTr("Сохранено в приложении.", "Saved in the app.")
                     saved.firstOrNull { it.id == work.id }?.let { openReader(it) }
                 } else {
-                    statusView?.text = "$error Долгое нажатие откроет статью в браузере."
+                    statusView?.text = error + scTr(
+                            " Долгое нажатие откроет статью в браузере.",
+                            " Long-press opens the article in the browser."
+                    )
                 }
             }
         }.start()
@@ -383,16 +475,24 @@ class ScLibraryDialogFragment : DialogFragment() {
         if (!file.exists()) {
             ScLibraryStore.remove(requireContext(), paper)
             refreshSaved()
-            Toast.makeText(requireContext(), "Файл не найден, скачайте статью заново", Toast.LENGTH_SHORT).show()
+            Toast.makeText(
+                    requireContext(),
+                    scTr("Файл не найден, скачайте статью заново", "File not found, download the paper again"),
+                    Toast.LENGTH_SHORT
+            ).show()
             return
         }
         ScPdfReaderFragment.newInstance(file.absolutePath, paper.title).show(parentFragmentManager, "ScPdfReader")
     }
 
-    private fun openInBrowser(work: Work) {
+    private fun openInBrowser(work: ScFoundWork) {
         val url = work.pdfUrl ?: work.landingUrl
         if (url.isNullOrEmpty()) {
-            Toast.makeText(requireContext(), "У этой работы нет открытой ссылки", Toast.LENGTH_SHORT).show()
+            Toast.makeText(
+                    requireContext(),
+                    scTr("У этой работы нет открытой ссылки", "This work has no open link"),
+                    Toast.LENGTH_SHORT
+            ).show()
             return
         }
         openUrlInChromeCustomTab(requireContext(), null, url)
@@ -401,13 +501,13 @@ class ScLibraryDialogFragment : DialogFragment() {
     private fun confirmDelete(paper: ScSavedPaper) {
         val appCtx = requireContext().applicationContext
         MaterialAlertDialogBuilder(requireContext())
-                .setTitle("Удалить из библиотеки?")
+                .setTitle(scTr("Удалить из библиотеки?", "Remove from library?"))
                 .setMessage(paper.title)
-                .setPositiveButton("Удалить") { _, _ ->
+                .setPositiveButton(scTr("Удалить", "Remove")) { _, _ ->
                     ScLibraryStore.remove(appCtx, paper)
                     if (isAdded) refreshSaved()
                 }
-                .setNegativeButton("Отмена", null)
+                .setNegativeButton(scTr("Отмена", "Cancel"), null)
                 .show()
     }
 
@@ -471,7 +571,7 @@ class ScLibraryDialogFragment : DialogFragment() {
             val col = holder.itemView as LinearLayout
             val isSaved = saved.any { it.id == work.id }
             val tag = when {
-                isSaved -> "  ·  ✓ сохранено"
+                isSaved -> scTr("  ·  ✓ сохранено", "  ·  ✓ saved")
                 work.pdfUrl != null -> "  ·  PDF"
                 else -> ""
             }
@@ -537,9 +637,12 @@ class ScLibraryDialogFragment : DialogFragment() {
     companion object {
         private const val PREFS = "sc_library"
         private const val KEY_API = "openalex_api_key"
+        private const val SOURCE_OPENALEX = "openalex"
+        private const val SOURCE_ARXIV = "arxiv"
+        private const val SOURCE_EPMC = "epmc"
         private val ACCENT = Color.parseColor("#4338CA")
 
-        /** Adds the "My literature" card to the Science tools dialog. */
+        /** Adds the "My library" card to the Science tools dialog. */
         fun attachEntry(content: View, onClick: () -> Unit) {
             val root = content as? LinearLayout ?: return
             val ctx = root.context
@@ -569,13 +672,13 @@ class ScLibraryDialogFragment : DialogFragment() {
 
             val col = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
             val name = TextView(ctx).apply {
-                text = "Моя литература"
+                text = scTr("Моя литература", "My library")
                 setTextColor(themeColor(ctx, android.R.attr.textColorPrimary, Color.BLACK))
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
                 typeface = Typeface.DEFAULT_BOLD
             }
             val desc = TextView(ctx).apply {
-                text = "Поиск, сохранение и чтение статей"
+                text = scTr("Поиск, сохранение и чтение статей", "Search, save and read papers")
                 setTextColor(themeColor(ctx, android.R.attr.textColorSecondary, Color.GRAY))
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
             }
