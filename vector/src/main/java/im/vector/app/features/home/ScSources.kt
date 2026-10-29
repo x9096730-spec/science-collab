@@ -20,9 +20,19 @@ data class ScFoundWork(
         val landingUrl: String?,
 )
 
+/** One page of search results. */
+data class ScPage(
+        val works: List<ScFoundWork>,
+        val total: Long,
+        val nextCursor: String?,
+        val hasMore: Boolean,
+)
+
 private fun JSONObject.sStr(name: String): String = if (isNull(name)) "" else optString(name, "")
 
 object ScSources {
+
+    const val PAGE_SIZE = 50
 
     private const val USER_AGENT = "ScienceCollab/1.0 (Android; academic reader)"
 
@@ -46,22 +56,23 @@ object ScSources {
      * arXiv (Atom feed)
      * ---------------------------------------------------------------------------------------- */
 
-    fun searchArxiv(query: String): List<ScFoundWork> {
+    fun searchArxiv(query: String, start: Int): ScPage {
         val words = query.trim()
                 .split(Regex("\\s+"))
                 .map { it.replace(Regex("[\":()]"), "") }
                 .filter { it.isNotEmpty() }
-        if (words.isEmpty()) return emptyList()
+        if (words.isEmpty()) return ScPage(emptyList(), 0L, null, false)
         val q = words.joinToString(" AND ") { "all:$it" }
         val url = "https://export.arxiv.org/api/query?search_query=" + URLEncoder.encode(q, "UTF-8") +
-                "&start=0&max_results=25"
-        return parseArxiv(httpGet(url))
+                "&start=$start&max_results=$PAGE_SIZE"
+        return parseArxiv(httpGet(url), start)
     }
 
-    private fun parseArxiv(xml: String): List<ScFoundWork> {
+    private fun parseArxiv(xml: String, start: Int): ScPage {
         val parser = Xml.newPullParser()
         parser.setInput(StringReader(xml))
         val out = ArrayList<ScFoundWork>()
+        var total = 0L
         var inEntry = false
         var id = ""
         var title = ""
@@ -72,7 +83,9 @@ object ScSources {
         while (event != XmlPullParser.END_DOCUMENT) {
             if (event == XmlPullParser.START_TAG) {
                 val tag = parser.name
-                if (tag == "entry") {
+                if (tag == "opensearch:totalResults" && !inEntry) {
+                    total = parser.nextText().trim().toLongOrNull() ?: 0L
+                } else if (tag == "entry") {
                     inEntry = true
                     id = ""
                     title = ""
@@ -104,24 +117,29 @@ object ScSources {
             }
             event = parser.next()
         }
-        return out
+        val more = out.size >= PAGE_SIZE && (total == 0L || start + out.size < total)
+        return ScPage(out, total, null, more)
     }
 
     /* ------------------------------------------------------------------------------------------
-     * Europe PMC (JSON)
+     * Europe PMC (JSON, cursor paging)
      * ---------------------------------------------------------------------------------------- */
 
-    fun searchEuropePmc(query: String): List<ScFoundWork> {
+    fun searchEuropePmc(query: String, cursor: String): ScPage {
         val cleanQuery = query.replace("(", " ").replace(")", " ").trim()
-        if (cleanQuery.isEmpty()) return emptyList()
+        if (cleanQuery.isEmpty()) return ScPage(emptyList(), 0L, null, false)
         val q = "($cleanQuery) AND OPEN_ACCESS:y AND HAS_PDF:y"
         val url = "https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=" + URLEncoder.encode(q, "UTF-8") +
-                "&format=json&resultType=core&pageSize=25"
-        return parseEuropePmc(httpGet(url))
+                "&format=json&resultType=core&pageSize=$PAGE_SIZE&cursorMark=" + URLEncoder.encode(cursor, "UTF-8")
+        return parseEuropePmc(httpGet(url), cursor)
     }
 
-    private fun parseEuropePmc(body: String): List<ScFoundWork> {
-        val results = JSONObject(body).optJSONObject("resultList")?.optJSONArray("result") ?: return emptyList()
+    private fun parseEuropePmc(body: String, cursor: String): ScPage {
+        val root = JSONObject(body)
+        val total = root.optLong("hitCount", 0L)
+        val next = root.sStr("nextCursorMark").ifEmpty { null }
+        val results = root.optJSONObject("resultList")?.optJSONArray("result")
+                ?: return ScPage(emptyList(), total, null, false)
         val out = ArrayList<ScFoundWork>()
         for (i in 0 until results.length()) {
             val o = results.optJSONObject(i) ?: continue
@@ -150,6 +168,7 @@ object ScSources {
             val meta = listOf(authors, year, "Europe PMC").filter { it.isNotEmpty() }.joinToString(" · ")
             out.add(ScFoundWork("epmc:$source:$id", title, meta, pdf, landing))
         }
-        return out
+        val more = results.length() >= PAGE_SIZE && next != null && next != cursor
+        return ScPage(out, total, next, more)
     }
 }
