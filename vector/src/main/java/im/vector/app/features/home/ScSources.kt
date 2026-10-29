@@ -18,6 +18,10 @@ data class ScFoundWork(
         val meta: String,
         val pdfUrl: String?,
         val landingUrl: String?,
+        val authors: List<String> = emptyList(),
+        val year: String = "",
+        val doi: String = "",
+        val publication: String = "",
 )
 
 /** One page of search results. */
@@ -112,7 +116,18 @@ object ScSources {
                     val meta = listOf(authors.take(3).joinToString(", "), year, "arXiv")
                             .filter { it.isNotEmpty() }
                             .joinToString(" · ")
-                    out.add(ScFoundWork("arxiv:$id", title, meta, pdfUrl, abs.ifEmpty { null }))
+                    out.add(
+                            ScFoundWork(
+                                    id = "arxiv:$id",
+                                    title = title,
+                                    meta = meta,
+                                    pdfUrl = pdfUrl,
+                                    landingUrl = abs.ifEmpty { null },
+                                    authors = ArrayList(authors),
+                                    year = year,
+                                    publication = "arXiv",
+                            )
+                    )
                 }
             }
             event = parser.next()
@@ -148,8 +163,9 @@ object ScSources {
             val source = o.sStr("source")
             val id = o.sStr("id")
             val pmcid = o.sStr("pmcid")
-            val authors = o.sStr("authorString").trimEnd('.').split(", ").take(3).joinToString(", ")
+            val authorList = o.sStr("authorString").trimEnd('.').split(", ").map { it.trim() }.filter { it.isNotEmpty() }
             val year = o.sStr("pubYear")
+            val journal = o.optJSONObject("journalInfo")?.optJSONObject("journal")?.sStr("title").orEmpty()
 
             var pdf: String? = null
             val list = o.optJSONObject("fullTextUrlList")?.optJSONArray("fullTextUrl")
@@ -165,8 +181,22 @@ object ScSources {
             }
             if (pdf == null && pmcid.isNotEmpty()) pdf = "https://europepmc.org/articles/$pmcid?pdf=render"
             val landing = if (source.isNotEmpty() && id.isNotEmpty()) "https://europepmc.org/article/$source/$id" else null
-            val meta = listOf(authors, year, "Europe PMC").filter { it.isNotEmpty() }.joinToString(" · ")
-            out.add(ScFoundWork("epmc:$source:$id", title, meta, pdf, landing))
+            val meta = listOf(authorList.take(3).joinToString(", "), year, "Europe PMC")
+                    .filter { it.isNotEmpty() }
+                    .joinToString(" · ")
+            out.add(
+                    ScFoundWork(
+                            id = "epmc:$source:$id",
+                            title = title,
+                            meta = meta,
+                            pdfUrl = pdf,
+                            landingUrl = landing,
+                            authors = authorList,
+                            year = year,
+                            doi = o.sStr("doi"),
+                            publication = journal.ifEmpty { "Europe PMC" },
+                    )
+            )
         }
         val more = results.length() >= PAGE_SIZE && next != null && next != cursor
         return ScPage(out, total, next, more)
