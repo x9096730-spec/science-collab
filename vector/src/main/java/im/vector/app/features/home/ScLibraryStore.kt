@@ -17,6 +17,11 @@ data class ScSavedPaper(
         val meta: String,
         val fileName: String,
         val savedAt: Long,
+        val authors: List<String> = emptyList(),
+        val year: String = "",
+        val doi: String = "",
+        val publication: String = "",
+        val url: String = "",
 )
 
 object ScLibraryStore {
@@ -42,6 +47,14 @@ object ScLibraryStore {
             val result = ArrayList<ScSavedPaper>()
             for (i in 0 until arr.length()) {
                 val o = arr.optJSONObject(i) ?: continue
+                val authors = ArrayList<String>()
+                val authorsArr = o.optJSONArray("authors")
+                if (authorsArr != null) {
+                    for (j in 0 until authorsArr.length()) {
+                        val a = authorsArr.optString(j)
+                        if (a.isNotEmpty()) authors.add(a)
+                    }
+                }
                 result.add(
                         ScSavedPaper(
                                 id = o.optString("id"),
@@ -49,6 +62,11 @@ object ScLibraryStore {
                                 meta = o.optString("meta"),
                                 fileName = o.optString("file"),
                                 savedAt = o.optLong("savedAt"),
+                                authors = authors,
+                                year = o.optString("year"),
+                                doi = o.optString("doi"),
+                                publication = o.optString("publication"),
+                                url = o.optString("url"),
                         )
                 )
             }
@@ -80,13 +98,29 @@ object ScLibraryStore {
                             .put("meta", p.meta)
                             .put("file", p.fileName)
                             .put("savedAt", p.savedAt)
+                            .put("authors", JSONArray(p.authors))
+                            .put("year", p.year)
+                            .put("doi", p.doi)
+                            .put("publication", p.publication)
+                            .put("url", p.url)
             )
         }
         indexFile(ctx).writeText(arr.toString())
     }
 
     /** Downloads a PDF into private app storage. Returns null on success, otherwise an error message. */
-    fun download(ctx: Context, id: String, url: String, title: String, meta: String): String? {
+    fun download(
+            ctx: Context,
+            id: String,
+            url: String,
+            title: String,
+            meta: String,
+            authors: List<String> = emptyList(),
+            year: String = "",
+            doi: String = "",
+            publication: String = "",
+            pageUrl: String = "",
+    ): String? {
         val fileName = "p" + Integer.toHexString(id.hashCode()) + ".pdf"
         val dest = File(dir(ctx), fileName)
         val tmp = File(dir(ctx), "$fileName.part")
@@ -119,7 +153,21 @@ object ScLibraryStore {
                         tmp.delete()
                         return "Не удалось сохранить файл."
                     }
-                    add(ctx, ScSavedPaper(id, title, meta, fileName, System.currentTimeMillis()))
+                    add(
+                            ctx,
+                            ScSavedPaper(
+                                    id = id,
+                                    title = title,
+                                    meta = meta,
+                                    fileName = fileName,
+                                    savedAt = System.currentTimeMillis(),
+                                    authors = authors,
+                                    year = year,
+                                    doi = doi,
+                                    publication = publication,
+                                    url = pageUrl,
+                            )
+                    )
                     return null
                 } else {
                     conn.disconnect()
