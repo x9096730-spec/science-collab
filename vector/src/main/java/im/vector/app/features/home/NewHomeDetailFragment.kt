@@ -279,6 +279,10 @@ class NewHomeDetailFragment :
             dialog.dismiss()
             ScGrantsDialogFragment().show(requireActivity().supportFragmentManager, "ScGrants")
         }
+        ScBoardsDialogFragment.attachEntry(content) {
+            dialog.dismiss()
+            ScBoardsDialogFragment().show(requireActivity().supportFragmentManager, "ScBoards")
+        }
         dialog.show()
     }
 
