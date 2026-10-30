@@ -29,7 +29,6 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import im.vector.app.core.utils.openUrlInChromeCustomTab
-import java.io.File
 import java.text.NumberFormat
 
 internal class ScZoteroPanel(
@@ -133,7 +132,7 @@ internal class ScZoteroPanel(
                 .show()
     }
 
-    private fun chooseCollection(c: ZoteroCredsAlias, lib: ScZLibrary, work: ScFoundWork) {
+    private fun chooseCollection(c: ScZoteroCreds, lib: ScZLibrary, work: ScFoundWork) {
         Thread {
             val cols = try {
                 ScZotero.collections(c, lib.prefix)
