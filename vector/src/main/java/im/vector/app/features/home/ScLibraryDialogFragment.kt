@@ -64,6 +64,7 @@ class ScLibraryDialogFragment : DialogFragment() {
     private var savedAdapter: SavedAdapter? = null
     private var statusView: TextView? = null
     private var savedEmptyView: TextView? = null
+    private var savedHintView: TextView? = null
     private var searchBox: EditText? = null
     private var keyBox: EditText? = null
     private var keyBlock: View? = null
@@ -275,6 +276,17 @@ class ScLibraryDialogFragment : DialogFragment() {
         }
         savedEmptyView = empty
         savedLayout.addView(empty)
+        val savedHint = TextView(ctx).apply {
+            text = scTr(
+                    "Нажмите, чтобы читать. «＋ Добавить в Zotero» отправит запись в вашу библиотеку Zotero.",
+                    "Tap to read. “＋ Add to Zotero” sends the paper to your Zotero library."
+            )
+            setTextColor(secondary)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            setPadding(0, dp(8), 0, dp(4))
+        }
+        savedHintView = savedHint
+        savedLayout.addView(savedHint)
         val savedListAdapter = SavedAdapter()
         savedAdapter = savedListAdapter
         val savedList = RecyclerView(ctx).apply {
@@ -350,6 +362,7 @@ class ScLibraryDialogFragment : DialogFragment() {
             scTr("Сохранённые (${saved.size})", "Saved (${saved.size})")
         }
         savedEmptyView?.visibility = if (saved.isEmpty()) View.VISIBLE else View.GONE
+        savedHintView?.visibility = if (saved.isEmpty()) View.GONE else View.VISIBLE
         savedAdapter?.notifyDataSetChanged()
         searchAdapter?.notifyDataSetChanged()
     }
@@ -526,6 +539,57 @@ class ScLibraryDialogFragment : DialogFragment() {
                 .show()
     }
 
+    /** Builds a work from a saved paper (older saves have no full metadata, so the caption is parsed). */
+    private fun workOf(paper: ScSavedPaper): ScFoundWork {
+        val parts = paper.meta.split(" · ")
+        val yearRegex = Regex("^\\d{4}$")
+        val authors = paper.authors.ifEmpty {
+            val first = parts.firstOrNull().orEmpty()
+            if (first.isNotEmpty() && !yearRegex.matches(first)) {
+                first.split(", ").map { it.trim() }.filter { it.isNotEmpty() }
+            } else {
+                emptyList<String>()
+            }
+        }
+        val year = paper.year.ifEmpty { parts.firstOrNull { yearRegex.matches(it) }.orEmpty() }
+        val publication = paper.publication.ifEmpty {
+            val last = parts.last()
+            if (parts.size >= 2 && !yearRegex.matches(last)) last else ""
+        }
+        return ScFoundWork(
+                id = paper.id,
+                title = paper.title,
+                meta = paper.meta,
+                pdfUrl = null,
+                landingUrl = paper.url.ifEmpty { null },
+                authors = authors,
+                year = year,
+                doi = paper.doi,
+                publication = publication,
+        )
+    }
+
+    private fun addSavedToZotero(paper: ScSavedPaper) {
+        zoteroPanel?.addToZotero(workOf(paper)) { showTab(TAB_ZOTERO) }
+    }
+
+    private fun showSavedMenu(paper: ScSavedPaper) {
+        val labels = ArrayList<String>()
+        val actions = ArrayList<() -> Unit>()
+        labels.add(scTr("Читать", "Read"))
+        actions.add { openReader(paper) }
+        if (!paper.id.startsWith("zotero:")) {
+            labels.add(scTr("Добавить в Zotero", "Add to Zotero"))
+            actions.add { addSavedToZotero(paper) }
+        }
+        labels.add(scTr("Удалить", "Remove"))
+        actions.add { confirmDelete(paper) }
+        MaterialAlertDialogBuilder(requireContext())
+                .setTitle(paper.title)
+                .setItems(labels.toTypedArray()) { _, which -> actions[which]() }
+                .show()
+    }
+
     private fun downloadAndOpen(work: ScFoundWork, pdfUrl: String) {
         if (downloading) {
             Toast.makeText(
@@ -539,7 +603,18 @@ class ScLibraryDialogFragment : DialogFragment() {
         statusView?.text = scTr("Скачиваю: ${work.title}", "Downloading: ${work.title}")
         val appCtx = requireContext().applicationContext
         Thread {
-            val error = ScLibraryStore.download(appCtx, work.id, pdfUrl, work.title, work.meta)
+            val error = ScLibraryStore.download(
+                    appCtx,
+                    work.id,
+                    pdfUrl,
+                    work.title,
+                    work.meta,
+                    work.authors,
+                    work.year,
+                    work.doi,
+                    work.publication,
+                    work.landingUrl ?: work.pdfUrl ?: ""
+            )
             activity?.runOnUiThread {
                 downloading = false
                 if (!isAdded) return@runOnUiThread
@@ -696,8 +771,17 @@ class ScLibraryDialogFragment : DialogFragment() {
                 setTextColor(themeColor(ctx, android.R.attr.textColorSecondary, Color.GRAY))
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
             }
+            val action = TextView(ctx).apply {
+                text = scTr("＋ Добавить в Zotero", "＋ Add to Zotero")
+                setTextColor(ACCENT)
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+                typeface = Typeface.DEFAULT_BOLD
+                setPadding(0, (8 * d).toInt(), 0, (4 * d).toInt())
+                isClickable = true
+            }
             col.addView(t)
             col.addView(m)
+            col.addView(action)
             row.addView(col, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             val del = TextView(ctx).apply {
                 text = "✕"
@@ -716,7 +800,14 @@ class ScLibraryDialogFragment : DialogFragment() {
             val col = row.getChildAt(0) as LinearLayout
             (col.getChildAt(0) as TextView).text = ScMath.render(paper.title)
             (col.getChildAt(1) as TextView).text = paper.meta
+            val action = col.getChildAt(2) as TextView
+            action.visibility = if (paper.id.startsWith("zotero:")) View.GONE else View.VISIBLE
+            action.setOnClickListener { addSavedToZotero(paper) }
             row.setOnClickListener { openReader(paper) }
+            row.setOnLongClickListener {
+                showSavedMenu(paper)
+                true
+            }
             row.getChildAt(1).setOnClickListener { confirmDelete(paper) }
         }
     }
