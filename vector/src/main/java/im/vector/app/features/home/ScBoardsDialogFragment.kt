@@ -1,6 +1,6 @@
 /*
  * Science Collab: "Projects and tasks" - kanban boards for grants, papers and teams.
- * Boards are stored on the phone (private app storage). Sharing as text uses the system share sheet.
+ * Boards are stored on the phone and can be synced with a chat room, so colleagues share one board.
  */
 
 package im.vector.app.features.home
@@ -13,6 +13,8 @@ import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.text.InputType
 import android.text.TextUtils
 import android.util.TypedValue
@@ -25,16 +27,23 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.DialogFragment
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import dagger.hilt.android.AndroidEntryPoint
 import im.vector.app.R
+import org.matrix.android.sdk.api.session.Session
+import org.matrix.android.sdk.api.session.room.RoomSummaryQueryParams
+import org.matrix.android.sdk.api.session.room.model.Membership
+import org.matrix.android.sdk.api.session.room.model.RoomSummary
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import javax.inject.Inject
 
 private fun boardColor(ctx: Context, attr: Int, fallback: Int): Int {
     val tv = TypedValue()
@@ -42,7 +51,10 @@ private fun boardColor(ctx: Context, attr: Int, fallback: Int): Int {
     return if (tv.resourceId != 0) ContextCompat.getColor(ctx, tv.resourceId) else tv.data
 }
 
+@AndroidEntryPoint
 class ScBoardsDialogFragment : DialogFragment() {
+
+    @Inject lateinit var session: Session
 
     private var boards: MutableList<ScBoard> = ArrayList()
     private var current: ScBoard? = null
@@ -50,6 +62,12 @@ class ScBoardsDialogFragment : DialogFragment() {
     private var columnsAdapter: ColumnsAdapter? = null
     private var progressView: TextView? = null
     private var titleView: TextView? = null
+
+    private var sync: ScBoardSync? = null
+    private val handler = Handler(Looper.getMainLooper())
+    private var publishRunnable: Runnable? = null
+    private var pendingBoard: ScBoard? = null
+    private val roomNames = HashMap<String, String>()
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 
@@ -80,9 +98,204 @@ class ScBoardsDialogFragment : DialogFragment() {
         return r
     }
 
+    override fun onDestroyView() {
+        flushPublish()
+        stopSync()
+        super.onDestroyView()
+    }
+
     private fun touch(board: ScBoard) {
         board.updatedAt = System.currentTimeMillis()
         ScBoards.save(requireContext(), boards)
+        schedulePublish(board)
+    }
+
+    /* ------------------------------------------------------------------------------------------
+     * Sync with a chat
+     * ---------------------------------------------------------------------------------------- */
+
+    private fun roomDisplayName(roomId: String): String {
+        if (roomId.isEmpty()) return ""
+        return roomNames.getOrPut(roomId) {
+            try {
+                session.roomService().getRoomSummary(roomId)?.displayName.orEmpty()
+            } catch (e: Exception) {
+                ""
+            }
+        }
+    }
+
+    private fun startSync(board: ScBoard) {
+        stopSync()
+        if (board.roomId.isEmpty()) return
+        val s = ScBoardSync(session, board.roomId) { snapshots ->
+            activity?.runOnUiThread {
+                if (isAdded) applyRemote(board, snapshots)
+            }
+        }
+        if (s.start()) {
+            sync = s
+        } else {
+            Toast.makeText(
+                    requireContext(),
+                    scTr("Чат этой доски не найден.", "The chat of this board was not found."),
+                    Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
+    private fun stopSync() {
+        sync?.stop()
+        sync = null
+    }
+
+    private fun applyRemote(board: ScBoard, snapshots: List<ScBoard>) {
+        if (current !== board) return
+        var changed = false
+        for (remote in snapshots) {
+            if (remote.id == board.id && ScBoards.mergeChanged(board, remote)) changed = true
+        }
+        if (changed) {
+            ScBoards.save(requireContext(), boards)
+            titleView?.text = board.title
+            columnsAdapter?.notifyDataSetChanged()
+            updateProgress()
+        }
+    }
+
+    private fun schedulePublish(board: ScBoard) {
+        if (board.roomId.isEmpty()) return
+        publishRunnable?.let { handler.removeCallbacks(it) }
+        pendingBoard = board
+        val r = Runnable { publishNow(board) }
+        publishRunnable = r
+        handler.postDelayed(r, 2500L)
+    }
+
+    private fun publishNow(board: ScBoard) {
+        publishRunnable?.let { handler.removeCallbacks(it) }
+        publishRunnable = null
+        pendingBoard = null
+        if (board.roomId.isEmpty()) return
+        val s = sync ?: ScBoardSync(session, board.roomId) { }
+        s.publish(board)
+    }
+
+    private fun flushPublish() {
+        pendingBoard?.let { publishNow(it) }
+    }
+
+    private fun chooseRoom(onChosen: (String, String) -> Unit) {
+        Thread {
+            val list: List<RoomSummary> = try {
+                val params = RoomSummaryQueryParams.Builder().apply {
+                    memberships = listOf(Membership.JOIN)
+                }.build()
+                session.roomService().getRoomSummaries(params)
+                        .sortedBy { it.displayName.lowercase(Locale.ROOT) }
+            } catch (e: Exception) {
+                emptyList()
+            }
+            activity?.runOnUiThread {
+                if (!isAdded) return@runOnUiThread
+                if (list.isEmpty()) {
+                    Toast.makeText(requireContext(), scTr("Чаты не найдены.", "No chats found."), Toast.LENGTH_LONG).show()
+                    return@runOnUiThread
+                }
+                val labels = list.map { s -> s.displayName.ifEmpty { s.roomId } }.toTypedArray()
+                MaterialAlertDialogBuilder(requireContext())
+                        .setTitle(scTr("Выберите чат", "Choose a chat"))
+                        .setItems(labels) { _, which -> onChosen(list[which].roomId, labels[which]) }
+                        .show()
+            }
+        }.start()
+    }
+
+    private fun linkBoard(board: ScBoard) {
+        chooseRoom { roomId, name ->
+            board.roomId = roomId
+            roomNames[roomId] = name
+            touch(board)
+            startSync(board)
+            publishNow(board)
+            updateProgress()
+            Toast.makeText(
+                    requireContext(),
+                    scTr(
+                            "Доска связана с чатом. Коллеги подключат её кнопкой «Из чата».",
+                            "The board is linked to the chat. Colleagues can connect it with “From a chat”."
+                    ),
+                    Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
+    private fun unlinkBoard(board: ScBoard) {
+        flushPublish()
+        stopSync()
+        board.roomId = ""
+        touch(board)
+        updateProgress()
+    }
+
+    private fun syncNow(board: ScBoard) {
+        if (board.roomId.isEmpty()) return
+        stopSync()
+        startSync(board)
+        publishNow(board)
+        Toast.makeText(requireContext(), scTr("Синхронизирую…", "Syncing…"), Toast.LENGTH_SHORT).show()
+    }
+
+    private fun importFromChat() {
+        chooseRoom { roomId, _ ->
+            val found = LinkedHashMap<String, ScBoard>()
+            val scanner = ScBoardSync(session, roomId) { snapshots ->
+                activity?.runOnUiThread {
+                    for (b in snapshots) {
+                        val existing = found[b.id]
+                        if (existing == null) found[b.id] = b else ScBoards.merge(existing, b)
+                    }
+                }
+            }
+            if (!scanner.start()) {
+                Toast.makeText(requireContext(), scTr("Чат не найден.", "Chat not found."), Toast.LENGTH_LONG).show()
+                return@chooseRoom
+            }
+            Toast.makeText(requireContext(), scTr("Ищу доски в чате…", "Looking for boards in the chat…"), Toast.LENGTH_SHORT).show()
+            handler.postDelayed(
+                    Runnable {
+                        scanner.stop()
+                        showImportChoices(roomId, found.values.toList())
+                    },
+                    4500L
+            )
+        }
+    }
+
+    private fun showImportChoices(roomId: String, found: List<ScBoard>) {
+        if (!isAdded) return
+        if (found.isEmpty()) {
+            Toast.makeText(
+                    requireContext(),
+                    scTr("В этом чате досок не найдено.", "No boards found in this chat."),
+                    Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+        val labels = found.map { it.title }.toTypedArray()
+        MaterialAlertDialogBuilder(requireContext())
+                .setTitle(scTr("Доски в чате", "Boards in the chat"))
+                .setItems(labels) { _, which ->
+                    val remote = found[which]
+                    val existing = boards.firstOrNull { it.id == remote.id }
+                    val board = existing ?: remote
+                    if (existing != null) ScBoards.merge(existing, remote)
+                    board.roomId = roomId
+                    if (existing == null) boards.add(0, board)
+                    ScBoards.save(requireContext(), boards)
+                    showBoard(board)
+                }
+                .show()
     }
 
     /* ------------------------------------------------------------------------------------------
@@ -90,6 +303,8 @@ class ScBoardsDialogFragment : DialogFragment() {
      * ---------------------------------------------------------------------------------------- */
 
     private fun showList() {
+        flushPublish()
+        stopSync()
         val r = root ?: return
         val c = requireContext()
         current = null
@@ -111,14 +326,19 @@ class ScBoardsDialogFragment : DialogFragment() {
         bar.addView(pill(c, scTr("Закрыть", "Close"), false) { dismiss() })
         r.addView(bar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
-        val newLp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-        newLp.topMargin = dp(12)
-        r.addView(pill(c, scTr("＋ Новая доска", "＋ New board"), true) { newBoard() }, newLp)
+        val actions = LinearLayout(c).apply { orientation = LinearLayout.HORIZONTAL }
+        actions.addView(pill(c, scTr("＋ Новая доска", "＋ New board"), true) { newBoard() })
+        val fromChatLp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        fromChatLp.marginStart = dp(8)
+        actions.addView(pill(c, scTr("🔗 Из чата", "🔗 From a chat"), false) { importFromChat() }, fromChatLp)
+        val actionsLp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        actionsLp.topMargin = dp(12)
+        r.addView(actions, actionsLp)
 
         r.addView(TextView(c).apply {
             text = scTr(
-                    "Создайте доску для гранта, статьи или любого проекта: задачи, сроки и исполнители в одном месте.",
-                    "Create a board for a grant, a paper or any project: tasks, deadlines and assignees in one place."
+                    "Создайте доску для гранта, статьи или любого проекта. Свяжите её с чатом, и коллеги будут видеть и править ту же доску.",
+                    "Create a board for a grant, a paper or any project. Link it to a chat and colleagues will see and edit the same board."
             )
             setTextColor(secondary())
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
@@ -170,6 +390,7 @@ class ScBoardsDialogFragment : DialogFragment() {
         actions.add {
             askText(scTr("Название проекта", "Project name"), board.title, "") { name ->
                 board.title = name
+                board.titleAt = System.currentTimeMillis()
                 touch(board)
                 titleView?.text = name
                 if (!inBoard) showList()
@@ -178,6 +399,15 @@ class ScBoardsDialogFragment : DialogFragment() {
         if (inBoard) {
             labels.add(scTr("Добавить колонку", "Add column"))
             actions.add { addColumn(board) }
+            if (board.roomId.isEmpty()) {
+                labels.add(scTr("Связать с чатом (общая доска)", "Link to a chat (shared board)"))
+                actions.add { linkBoard(board) }
+            } else {
+                labels.add(scTr("Синхронизировать сейчас", "Sync now"))
+                actions.add { syncNow(board) }
+                labels.add(scTr("Отключить от чата", "Unlink from the chat"))
+                actions.add { unlinkBoard(board) }
+            }
             labels.add(scTr("Поделиться (текстом)", "Share (as text)"))
             actions.add { shareBoard(board) }
         }
@@ -192,7 +422,16 @@ class ScBoardsDialogFragment : DialogFragment() {
     private fun confirmDeleteBoard(board: ScBoard) {
         MaterialAlertDialogBuilder(requireContext())
                 .setTitle(scTr("Удалить доску?", "Delete the board?"))
-                .setMessage(board.title)
+                .setMessage(
+                        board.title + if (board.roomId.isEmpty()) {
+                            ""
+                        } else {
+                            "\n\n" + scTr(
+                                    "Доска удалится только на этом телефоне. У коллег она останется.",
+                                    "The board is deleted only on this phone. Colleagues keep it."
+                            )
+                        }
+                )
                 .setPositiveButton(scTr("Удалить", "Delete")) { _, _ ->
                     boards.remove(board)
                     ScBoards.save(requireContext(), boards)
@@ -228,6 +467,7 @@ class ScBoardsDialogFragment : DialogFragment() {
     private fun showBoard(board: ScBoard) {
         val r = root ?: return
         val c = requireContext()
+        stopSync()
         current = board
         r.removeAllViews()
 
@@ -266,24 +506,38 @@ class ScBoardsDialogFragment : DialogFragment() {
             this.adapter = adapterLocal
         }
         r.addView(columnsList, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+
+        startSync(board)
     }
 
     private fun updateProgress() {
         val board = current ?: return
         val total = board.totalCards()
         val done = board.doneCards()
-        progressView?.text = if (total == 0) {
+        val line1 = if (total == 0) {
             scTr("Задач пока нет. Нажмите «＋ Добавить задачу» в любой колонке.", "No tasks yet. Tap “＋ Add task” in any column.")
         } else {
             val percent = done * 100 / total
             scTr("Выполнено $done из $total · $percent%", "Done $done of $total · $percent%")
         }
+        val line2 = if (board.roomId.isEmpty()) {
+            scTr(
+                    "Только на этом телефоне. «⋯» → «Связать с чатом», и коллеги увидят доску.",
+                    "Only on this phone. “⋯” → “Link to a chat” so colleagues can see the board."
+            )
+        } else {
+            val name = roomDisplayName(board.roomId)
+            scTr("🔗 Общая доска · чат «$name»", "🔗 Shared board · chat “$name”")
+        }
+        progressView?.text = line1 + "\n" + line2
     }
 
     private fun addColumn(board: ScBoard) {
         askText(scTr("Название колонки", "Column name"), "", "") { name ->
+            val now = System.currentTimeMillis()
             val index = if (board.columns.size >= 2) board.columns.size - 1 else board.columns.size
-            board.columns.add(index, ScColumn(ScBoards.newId(), name, ArrayList()))
+            board.columns.add(index, ScColumn(ScBoards.newId(), name, ArrayList(), now))
+            board.structAt = now
             touch(board)
             columnsAdapter?.notifyDataSetChanged()
             updateProgress()
@@ -300,6 +554,7 @@ class ScBoardsDialogFragment : DialogFragment() {
                     if (which == 0) {
                         askText(scTr("Название колонки", "Column name"), column.title, "") { name ->
                             column.title = name
+                            column.titleAt = System.currentTimeMillis()
                             touch(board)
                             columnsAdapter?.notifyItemChanged(index)
                         }
@@ -320,7 +575,11 @@ class ScBoardsDialogFragment : DialogFragment() {
                 .setTitle(scTr("Удалить колонку?", "Delete the column?"))
                 .setMessage(column.title + (if (warning.isEmpty()) "" else "\n\n$warning"))
                 .setPositiveButton(scTr("Удалить", "Delete")) { _, _ ->
+                    val now = System.currentTimeMillis()
+                    for (card in column.cards) board.tombstones[card.id] = now
+                    board.tombstones[column.id] = now
                     board.columns.remove(column)
+                    board.structAt = now
                     touch(board)
                     columnsAdapter?.notifyDataSetChanged()
                     updateProgress()
@@ -333,7 +592,10 @@ class ScBoardsDialogFragment : DialogFragment() {
         val board = current ?: return
         if (to < 0 || to >= board.columns.size) return
         board.columns[from].cards.remove(card)
-        board.columns[to].cards.add(0, card)
+        val target = board.columns[to].cards
+        card.pos = (target.minOfOrNull { it.pos } ?: 1.0) - 1.0
+        card.updatedAt = System.currentTimeMillis()
+        target.add(0, card)
         touch(board)
         columnsAdapter?.notifyItemChanged(from)
         columnsAdapter?.notifyItemChanged(to)
@@ -403,13 +665,17 @@ class ScBoardsDialogFragment : DialogFragment() {
                     if (t.isNotEmpty()) {
                         val note = noteBox.text.toString().trim()
                         val who = whoBox.text.toString().trim()
+                        val now = System.currentTimeMillis()
                         if (card == null) {
-                            board.columns[colIndex].cards.add(ScCard(ScBoards.newId(), t, note, who, due))
+                            val cards = board.columns[colIndex].cards
+                            val pos = (cards.maxOfOrNull { it.pos } ?: 0.0) + 1.0
+                            cards.add(ScCard(ScBoards.newId(), t, note, who, due, now, pos))
                         } else {
                             card.title = t
                             card.note = note
                             card.assignee = who
                             card.due = due
+                            card.updatedAt = now
                         }
                         touch(board)
                         columnsAdapter?.notifyItemChanged(colIndex)
@@ -420,6 +686,7 @@ class ScBoardsDialogFragment : DialogFragment() {
         if (card != null) {
             builder.setNeutralButton(scTr("Удалить", "Delete")) { _, _ ->
                 board.columns[colIndex].cards.remove(card)
+                board.tombstones[card.id] = System.currentTimeMillis()
                 touch(board)
                 columnsAdapter?.notifyItemChanged(colIndex)
                 updateProgress()
@@ -572,10 +839,12 @@ class ScBoardsDialogFragment : DialogFragment() {
             val date = SimpleDateFormat("dd.MM.yyyy", Locale.US).format(Date(board.updatedAt))
             val total = board.totalCards()
             val done = board.doneCards()
-            (card.getChildAt(1) as TextView).text = scTr(
+            val base = scTr(
                     "Задач: $total · выполнено: $done · $date",
                     "Tasks: $total · done: $done · $date"
             )
+            val link = if (board.roomId.isEmpty()) "" else "\n🔗 " + roomDisplayName(board.roomId)
+            (card.getChildAt(1) as TextView).text = base + link
             card.setOnClickListener { showBoard(board) }
             card.setOnLongClickListener {
                 boardMenu(board, false)
@@ -797,7 +1066,7 @@ class ScBoardsDialogFragment : DialogFragment() {
                 typeface = Typeface.DEFAULT_BOLD
             })
             col.addView(TextView(ctx).apply {
-                text = scTr("Канбан-доска для грантов, статей и команд", "Kanban board for grants, papers and teams")
+                text = scTr("Общая канбан-доска для команды", "Shared kanban board for your team")
                 setTextColor(boardColor(ctx, android.R.attr.textColorSecondary, Color.GRAY))
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
             })
@@ -808,4 +1077,4 @@ class ScBoardsDialogFragment : DialogFragment() {
             root.addView(row, minOf(3, root.childCount))
         }
     }
-}
+}             
